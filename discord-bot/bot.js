@@ -16,11 +16,12 @@ const client = new Client({
     GatewayIntentBits.MessageContent,
     GatewayIntentBits.GuildMembers,
   ],
-  partials: [Partials.Message],
+  partials: [Partials.Message, Partials.Channel],
 });
 
-client.once('ready', () => {
+client.once('clientReady', () => {
   console.log(`Bot is online as ${client.user.tag}`);
+  console.log(`Watching: ROLE_1_ID=${ROLE_1_ID} | ROLE_2_ID=${ROLE_2_ID}`);
 });
 
 client.on('messageCreate', async (message) => {
@@ -31,6 +32,8 @@ client.on('messageCreate', async (message) => {
 
   const hasRole1 = memberRoles.has(ROLE_1_ID);
 
+  console.log(`[MSG] Author: ${message.author.tag} | hasRole1: ${hasRole1} | content: "${message.content}" | mentionedRoles: ${[...message.mentions.roles.values()].map(r => r.id).join(', ') || 'none'}`);
+
   if (!hasRole1) return;
 
   const mentionedRoles = message.mentions.roles;
@@ -38,6 +41,8 @@ client.on('messageCreate', async (message) => {
   if (mentionedRoles.size === 0) return;
 
   const hasDisallowedMention = mentionedRoles.some(role => role.id !== ROLE_2_ID);
+
+  console.log(`[ROLE1 ACTION] mentionedRoles: ${[...mentionedRoles.values()].map(r => r.id).join(', ')} | hasDisallowedMention: ${hasDisallowedMention}`);
 
   if (hasDisallowedMention) {
     try {
@@ -47,7 +52,7 @@ client.on('messageCreate', async (message) => {
       );
       setTimeout(() => warning.delete().catch(() => {}), 5000);
     } catch (err) {
-      console.error('Error handling message:', err);
+      console.error('Error handling message:', err.message);
     }
   }
 });
