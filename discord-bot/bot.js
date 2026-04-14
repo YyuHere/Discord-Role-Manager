@@ -1,13 +1,24 @@
 import { Client, GatewayIntentBits, Partials } from 'discord.js';
 
 const DISCORD_BOT_TOKEN = process.env.DISCORD_BOT_TOKEN;
-const ROLE_1_ID = process.env.ROLE_1_ID;
-const ROLE_2_ID = process.env.ROLE_2_ID;
 
-if (!DISCORD_BOT_TOKEN || !ROLE_1_ID || !ROLE_2_ID) {
-  console.error('Missing environment variables: DISCORD_BOT_TOKEN, ROLE_1_ID, ROLE_2_ID');
+if (!DISCORD_BOT_TOKEN) {
+  console.error('Missing DISCORD_BOT_TOKEN');
   process.exit(1);
 }
+
+// Map: رول اللي عنده صلاحية → الرول اللي مسموح يمنشنه بس
+const ROLE_MENTION_MAP = {
+  '1493272544252399648': '1493317999418015914',
+  '1493272676603658310': '1493318000848408606',
+  '1493272840265269469': '1493318001468899490',
+  '1493272956527448276': '1493656673938706442',
+  '1493273089356857354': '1493317990286889010',
+  '1493273151570706668': '1493657567073796148',
+  '1493273222664290385': '1493657460811235500',
+  '1493334335497961642': '1493658104297160857',
+  '1493273292704977051': '1493318000181252107',
+};
 
 const client = new Client({
   intents: [
@@ -21,7 +32,7 @@ const client = new Client({
 
 client.once('clientReady', () => {
   console.log(`Bot is online as ${client.user.tag}`);
-  console.log(`Watching: ROLE_1_ID=${ROLE_1_ID} | ROLE_2_ID=${ROLE_2_ID}`);
+  console.log(`Watching ${Object.keys(ROLE_MENTION_MAP).length} role mappings`);
 });
 
 client.on('messageCreate', async (message) => {
@@ -30,30 +41,31 @@ client.on('messageCreate', async (message) => {
   const memberRoles = message.member?.roles?.cache;
   if (!memberRoles) return;
 
-  const hasRole1 = memberRoles.has(ROLE_1_ID);
-
-  console.log(`[MSG] Author: ${message.author.tag} | hasRole1: ${hasRole1} | content: "${message.content}" | mentionedRoles: ${[...message.mentions.roles.values()].map(r => r.id).join(', ') || 'none'}`);
-
-  if (!hasRole1) return;
-
   const mentionedRoles = message.mentions.roles;
-
   if (mentionedRoles.size === 0) return;
 
-  const hasDisallowedMention = mentionedRoles.some(role => role.id !== ROLE_2_ID);
+  // إيجاد أي رول من المنشن-ماب عند الشخص ده
+  for (const [sourceRoleId, allowedTargetRoleId] of Object.entries(ROLE_MENTION_MAP)) {
+    if (!memberRoles.has(sourceRoleId)) continue;
 
-  console.log(`[ROLE1 ACTION] mentionedRoles: ${[...mentionedRoles.values()].map(r => r.id).join(', ')} | hasDisallowedMention: ${hasDisallowedMention}`);
+    // الشخص عنده الرول ده - نتحقق إن المنشن للرول المسموح بيه بس
+    const hasDisallowedMention = mentionedRoles.some(role => role.id !== allowedTargetRoleId);
 
-  if (hasDisallowedMention) {
-    try {
-      await message.delete();
-      const warning = await message.channel.send(
-        `${message.author}, أنت تقدر تعمل منشن لـ <@&${ROLE_2_ID}> فقط.`
-      );
-      setTimeout(() => warning.delete().catch(() => {}), 5000);
-    } catch (err) {
-      console.error('Error handling message:', err.message);
+    if (hasDisallowedMention) {
+      try {
+        await message.delete();
+        const warning = await message.channel.send(
+          `${message.author}، أنت تقدر تعمل منشن لـ <@&${allowedTargetRoleId}> فقط.`
+        );
+        setTimeout(() => warning.delete().catch(() => {}), 5000);
+      } catch (err) {
+        console.error('Error handling message:', err.message);
+      }
+      return;
     }
+
+    // المنشن مسموح، مفيش حاجة نعملها
+    return;
   }
 });
 
