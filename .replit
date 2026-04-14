@@ -26,3 +26,9 @@ externalPort = 8080
 [[ports]]
 localPort = 8081
 externalPort = 80
+
+[userenv]
+
+[userenv.shared]
+ROLE_1_ID = "1493272544252399648"
+ROLE_2_ID = "1493317999418015914"
