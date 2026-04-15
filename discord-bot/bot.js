@@ -23,7 +23,7 @@ const ROLE_MENTION_MAP = {
 // مدد الكتم التدريجية بالدقائق: مخالفة 1 = حذف بس، 2 = 5 دقائق، 3 = 10، 4 = 30، 5+ = 60
 const MUTE_DURATIONS_MINUTES = [0, 5, 10, 30, 60];
 
-const MUTE_ROLE_ID = '1493772884013744189';
+const MUTE_ROLE_ID = '1493775095028645969';
 
 // تتبع مخالفات الروابط لكل يوزر { userId: violations }
 const linkViolations = new Map();
