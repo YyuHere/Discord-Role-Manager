@@ -54,8 +54,9 @@ client.on('messageCreate', async (message) => {
       try {
         await message.delete();
         const warning = await message.channel.send(
-          `${message.author}، أنت تقدر تعمل منشن لـ <@&${allowedTargetRoleId}> فقط.`
+          `You are only allowed to mention <@&${allowedTargetRoleId}>.\n\n${message.author}`
         );
+        await warning.react('<:take_off:1493315702470479913>').catch(() => {});
         setTimeout(() => warning.delete().catch(() => {}), 5000);
       } catch (err) {
         console.error('Error handling message:', err.message);
