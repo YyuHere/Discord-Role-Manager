@@ -63,7 +63,19 @@ client.on('messageCreate', async (message) => {
       return;
     }
 
-    // المنشن مسموح، مفيش حاجة نعملها
+    // المنشن مسموح - نتحقق إن في نص مع المنشن
+    const textOnly = message.content.replace(/<@&\d+>/g, '').trim();
+    if (textOnly.length === 0) {
+      try {
+        await message.delete();
+        const warning = await message.channel.send(
+          `You must include a message with your mention.\n\n${message.author}`
+        );
+        setTimeout(() => warning.delete().catch(() => {}), 5000);
+      } catch (err) {
+        console.error('Error handling message:', err.message);
+      }
+    }
     return;
   }
 });
