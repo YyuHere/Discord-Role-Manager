@@ -1,4 +1,4 @@
-import { Client, GatewayIntentBits, Partials } from 'discord.js';
+import { Client, GatewayIntentBits, Partials, PermissionFlagsBits } from 'discord.js';
 
 const DISCORD_BOT_TOKEN = process.env.DISCORD_BOT_TOKEN;
 
@@ -20,6 +20,14 @@ const ROLE_MENTION_MAP = {
   '1493273292704977051': '1493318000181252107',
 };
 
+// مدد الكتم التدريجية بالدقائق: مخالفة 1 = حذف بس، 2 = 5 دقائق، 3 = 10، 4 = 30، 5+ = 60
+const MUTE_DURATIONS_MINUTES = [0, 5, 10, 30, 60];
+
+// تتبع مخالفات الروابط لكل يوزر { userId: violations }
+const linkViolations = new Map();
+
+const URL_REGEX = /https?:\/\/\S+|discord\.gg\/\S+|www\.\S+\.\S+/gi;
+
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -40,14 +48,50 @@ client.on('messageCreate', async (message) => {
   const memberRoles = message.member?.roles?.cache;
   if (!memberRoles) return;
 
+  // ===== فلتر الروابط =====
+  if (URL_REGEX.test(message.content)) {
+    URL_REGEX.lastIndex = 0;
+
+    // تجاهل لو عنده صلاحية إدارة الرسائل
+    const canManageMessages = message.member.permissions.has(PermissionFlagsBits.ManageMessages);
+    if (!canManageMessages) {
+      try {
+        await message.delete();
+
+        const userId = message.author.id;
+        const violations = (linkViolations.get(userId) || 0) + 1;
+        linkViolations.set(userId, violations);
+
+        const muteIndex = Math.min(violations - 1, MUTE_DURATIONS_MINUTES.length - 1);
+        const muteDuration = MUTE_DURATIONS_MINUTES[muteIndex];
+
+        if (muteDuration > 0) {
+          await message.member.timeout(muteDuration * 60 * 1000, 'Sending links is not allowed');
+          const warning = await message.channel.send(
+            `Links are not allowed here. You have been muted for **${muteDuration} minutes**.\n\n${message.author}`
+          );
+          setTimeout(() => warning.delete().catch(() => {}), 7000);
+        } else {
+          const warning = await message.channel.send(
+            `Links are not allowed here.\n\n${message.author}`
+          );
+          setTimeout(() => warning.delete().catch(() => {}), 5000);
+        }
+      } catch (err) {
+        console.error('Error handling link:', err.message);
+      }
+      return;
+    }
+  }
+  URL_REGEX.lastIndex = 0;
+
+  // ===== فلتر المنشن =====
   const mentionedRoles = message.mentions.roles;
   if (mentionedRoles.size === 0) return;
 
-  // إيجاد أي رول من المنشن-ماب عند الشخص ده
   for (const [sourceRoleId, allowedTargetRoleId] of Object.entries(ROLE_MENTION_MAP)) {
     if (!memberRoles.has(sourceRoleId)) continue;
 
-    // الشخص عنده الرول ده - نتحقق إن المنشن للرول المسموح بيه بس
     const hasDisallowedMention = mentionedRoles.some(role => role.id !== allowedTargetRoleId);
 
     if (hasDisallowedMention) {
@@ -58,7 +102,7 @@ client.on('messageCreate', async (message) => {
         );
         setTimeout(() => warning.delete().catch(() => {}), 5000);
       } catch (err) {
-        console.error('Error handling message:', err.message);
+        console.error('Error handling mention:', err.message);
       }
       return;
     }
@@ -73,7 +117,7 @@ client.on('messageCreate', async (message) => {
         );
         setTimeout(() => warning.delete().catch(() => {}), 5000);
       } catch (err) {
-        console.error('Error handling message:', err.message);
+        console.error('Error handling mention:', err.message);
       }
     }
     return;
