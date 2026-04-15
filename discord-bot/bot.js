@@ -23,6 +23,8 @@ const ROLE_MENTION_MAP = {
 // مدد الكتم التدريجية بالدقائق: مخالفة 1 = حذف بس، 2 = 5 دقائق، 3 = 10، 4 = 30، 5+ = 60
 const MUTE_DURATIONS_MINUTES = [0, 5, 10, 30, 60];
 
+const MUTE_ROLE_ID = '1493772884013744189';
+
 // تتبع مخالفات الروابط لكل يوزر { userId: violations }
 const linkViolations = new Map();
 
@@ -66,7 +68,10 @@ client.on('messageCreate', async (message) => {
         const muteDuration = MUTE_DURATIONS_MINUTES[muteIndex];
 
         if (muteDuration > 0) {
-          await message.member.timeout(muteDuration * 60 * 1000, 'Sending links is not allowed');
+          await message.member.roles.add(MUTE_ROLE_ID, 'Sending links is not allowed');
+          setTimeout(() => {
+            message.member.roles.remove(MUTE_ROLE_ID, 'Mute duration expired').catch(() => {});
+          }, muteDuration * 60 * 1000);
           const warning = await message.channel.send(
             `Links are not allowed here. You have been muted for **${muteDuration} minutes**.\n\n${message.author}`
           );
