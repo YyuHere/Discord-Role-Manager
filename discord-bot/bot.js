@@ -32,7 +32,6 @@ const client = new Client({
 
 client.once('clientReady', () => {
   console.log(`Bot is online as ${client.user.tag}`);
-  console.log(`Watching ${Object.keys(ROLE_MENTION_MAP).length} role mappings`);
 });
 
 client.on('messageCreate', async (message) => {
