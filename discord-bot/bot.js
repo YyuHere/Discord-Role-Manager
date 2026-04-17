@@ -84,8 +84,8 @@ async function applyProgressiveMute(message, violationsMap, reason, warningText)
 client.once('clientReady', () => {
   console.log(`Bot is online as ${client.user.tag}`);
   client.user.setPresence({
-    status: 'online',
-    activities: [{ name: 'Moderating', type: 3 }],
+    status: 'idel',
+    activities: [{ name: 'Helpr', type: 3 }],
   });
 });
 
