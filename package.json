@@ -3,6 +3,6 @@
   "version": "0.0.0",
   "license": "MIT",
   "scripts": {
-    "start": "node discord-bot/index.js"
+    "start": "node index.js"
   }
 }
