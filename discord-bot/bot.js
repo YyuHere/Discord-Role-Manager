@@ -7,19 +7,23 @@ if (!DISCORD_BOT_TOKEN) {
   process.exit(1);
 }
 
-// --- الإعدادات العامة ---
-const ANNOUNCEMENT_CHANNEL_ID = 'ضع_هنا_ID_الروم_المعينة'; 
-const NOTIFICATIONS_ROLE_ID = 'ضع_هنا_ID_رول_الاشعارات';
+// --- الإعدادات الخاصة بروم الإشعارات (تعديلك المطلوب) ---
+// حط هنا ID الشات اللي عاوزه للإشعارات بس
+const ANNOUNCEMENT_CHANNEL_ID = '1492963468431720635'; 
+// حط هنا ID رول الإشعارات المسموح به
+const NOTIFICATIONS_ROLE_ID = '1493318000181252107'; 
+// رتبة الكتم
 const MUTE_ROLE_ID = '1493775095028645969';
-// -----------------------
+// ---------------------------------------------------
 
+// الخريطة: [الرول اللي عالشمال] -> [الشات المسموح فيه المذكور عاليمين]
 const ROLE_MENTION_MAP = {
   '1493317999418015914': '1492963034422050836',
   '1493318000848408606': '1493268166544195697',
   '1493318001468899490': '1493268285423354018',
   '1493656673938706442': '1493268335117209822',
   '1493317990286889010': '1492963182602354860',
-  // تم الإصلاح هنا بوضع الـ 3 شاتات داخل [ ] وفواصل
+  // الرول ده مسموح له في 3 شاتات (تم وضعهم داخل مصفوفة)
   '1493318000181252107': ['1492963468431720635', '1492964255811506176', '1492963572983140504'],
   '1493658104297160857': '1493269153417527388',
   '1493657567073796148': '1493269488139899004',
@@ -77,7 +81,7 @@ client.on('messageCreate', async (message) => {
   const memberRoles = message.member?.roles?.cache;
   if (!memberRoles) return;
 
-  // 1. فلاتر عامة (NSFW / Links)
+  // 1. الفلاتر العامة
   const contentLower = message.content.toLowerCase();
   if (message.attachments.size > 0 || message.stickers.size > 0 || NSFW_KEYWORDS.some(kw => contentLower.includes(kw))) {
     if (await applyProgressiveMute(message, nsfwViolations, 'NSFW', 'NSFW content is not allowed.')) return;
@@ -87,41 +91,44 @@ client.on('messageCreate', async (message) => {
     if (await applyProgressiveMute(message, linkViolations, 'Links', 'Links are not allowed.')) return;
   }
 
-  // 2. نظام الروم المعينة (مسموح منشن رول واحد فقط)
+  // 2. فحص الروم المعينة (شات الإشعارات)
   const mentionedRoles = message.mentions.roles;
   const hasEveryone = message.content.includes('@everyone') || message.content.includes('@here');
 
   if (message.channel.id === ANNOUNCEMENT_CHANNEL_ID) {
     if (mentionedRoles.size > 0 || hasEveryone || message.mentions.users.size > 0) {
-      const isOnlyAllowedRole = mentionedRoles.size === 1 && mentionedRoles.has(NOTIFICATIONS_ROLE_ID) && !hasEveryone && message.mentions.users.size === 0;
-      if (!isOnlyAllowedRole) {
+      // السماح فقط بمنشن رول الإشعارات المحدد فوق
+      const isOnlyAllowedNotif = mentionedRoles.size === 1 && mentionedRoles.has(NOTIFICATIONS_ROLE_ID) && !hasEveryone && message.mentions.users.size === 0;
+      
+      if (!isOnlyAllowedNotif) {
         await message.delete().catch(() => {});
-        const warn = await message.channel.send(`Only <@&${NOTIFICATIONS_ROLE_ID}> is allowed here!`);
+        const warn = await message.channel.send(`في هذه الروم، مسموح فقط بمنشن <@&${NOTIFICATIONS_ROLE_ID}>!`);
         setTimeout(() => warn.delete().catch(() => {}), 5000);
         return;
       }
     }
   }
 
-  // 3. نظام ROLE_MENTION_MAP (باقي الشاتات)
+  // 3. فحص الصلاحيات بناءً على الخريطة (بقية الشاتات)
   if (mentionedRoles.size > 0) {
-    for (const [sourceRoleId, allowed] of Object.entries(ROLE_MENTION_MAP)) {
+    for (const [sourceRoleId, allowedChannels] of Object.entries(ROLE_MENTION_MAP)) {
       if (memberRoles.has(sourceRoleId)) {
-        // تحويل المسموح لمصفوفة دايمًا عشان نعرف نقارن
-        const allowedList = Array.isArray(allowed) ? allowed : [allowed];
-        const hasDisallowed = mentionedRoles.some(role => !allowedList.includes(role.id));
-
-        if (hasDisallowed) {
-          await message.delete().catch(() => {});
-          const warn = await message.channel.send(`You can only mention: ${allowedList.map(id => `<@&${id}>`).join(', ')}`);
-          setTimeout(() => warn.delete().catch(() => {}), 5000);
-          return;
+        // التأكد من أن الشات الحالي هو ضمن الشاتات المسموحة لهذا الرول
+        const allowedChannelsList = Array.isArray(allowedChannels) ? allowedChannels : [allowedChannels];
+        
+        // إذا كان يحاول المنشن في شات مش بتاعه
+        if (!allowedChannelsList.includes(message.channel.id)) {
+            // هنا ممكن تمسح الرسالة لو مش عاوزة يمنشن في شاتات غريبة
+            await message.delete().catch(() => {});
+            const warn = await message.channel.send(`هذا الرول مسموح له بالمنشن في شاتات معينة فقط.`);
+            setTimeout(() => warn.delete().catch(() => {}), 5000);
+            return;
         }
 
         // منع المنشن بدون نص
         if (message.content.replace(/<@&\d+>/g, '').trim().length === 0) {
           await message.delete().catch(() => {});
-          const warn = await message.channel.send(`You must include a message with your mention.`);
+          const warn = await message.channel.send(`يجب كتابة رسالة مع المنشن.`);
           setTimeout(() => warn.delete().catch(() => {}), 5000);
           return;
         }
