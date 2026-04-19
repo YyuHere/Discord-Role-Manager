@@ -7,10 +7,10 @@ if (!DISCORD_BOT_TOKEN) {
   process.exit(1);
 }
 
-// رتبة الكتم
+// Mute Role ID
 const MUTE_ROLE_ID = '1493775095028645969';
 
-// الخريطة: [ايدي الرتبة]: [ايدي الشات المسموح]
+// Map: [Role ID]: [Allowed Channel ID(s)]
 const ROLE_MENTION_MAP = {
   '1493317999418015914': '1492963034422050836',
   '1493318000848408606': '1493268166544195697',
@@ -53,12 +53,12 @@ async function applyProgressiveMute(message, violationsMap, reason, warningText)
   if (muteDuration > 0) {
     await message.member.roles.add(MUTE_ROLE_ID, reason).catch(() => {});
     setTimeout(() => {
-      message.member.roles.remove(MUTE_ROLE_ID, 'Expired').catch(() => {});
+      message.member.roles.remove(MUTE_ROLE_ID, 'Mute Expired').catch(() => {});
     }, muteDuration * 60 * 1000);
-    const warning = await message.channel.send(`${warningText} Muted: **${muteDuration}m**.\n${message.author}`);
+    const warning = await message.channel.send(`${message.author}, ${warningText} You have been muted for **${muteDuration}m**.`);
     setTimeout(() => warning.delete().catch(() => {}), 7000);
   } else {
-    const warning = await message.channel.send(`${warningText}\n${message.author}`);
+    const warning = await message.channel.send(`${message.author}, ${warningText}`);
     setTimeout(() => warning.delete().catch(() => {}), 5000);
   }
   return true;
@@ -74,47 +74,44 @@ client.on('messageCreate', async (message) => {
   const memberRoles = message.member?.roles?.cache;
   if (!memberRoles) return;
 
-  // 1. الفلاتر العامة
   const contentLower = message.content.toLowerCase();
+
+  // 1. NSFW & Media Filter
   if (message.attachments.size > 0 || message.stickers.size > 0 || NSFW_KEYWORDS.some(kw => contentLower.includes(kw))) {
-    if (await applyProgressiveMute(message, nsfwViolations, 'NSFW', 'NSFW content is not allowed.')) return;
-  }
-  if (URL_REGEX.test(message.content)) {
-    URL_REGEX.lastIndex = 0;
-    if (await applyProgressiveMute(message, linkViolations, 'Links', 'Links are not allowed.')) return;
+    if (await applyProgressiveMute(message, nsfwViolations, 'NSFW/Media Content', 'Media or NSFW content is not allowed in this channel.')) return;
   }
 
-  // 2. نظام المنشن المخصص
+  // 2. Link Filter
+  if (URL_REGEX.test(message.content)) {
+    URL_REGEX.lastIndex = 0;
+    if (await applyProgressiveMute(message, linkViolations, 'External Links', 'Posting links is not allowed here.')) return;
+  }
+
+  // 3. Custom Mention System
   const mentionedRoles = message.mentions.roles;
   const hasEveryone = message.content.includes('@everyone') || message.content.includes('@here');
 
   if (mentionedRoles.size > 0 || hasEveryone) {
-    // استثناء أصحاب الصلاحيات الإدارية
     if (message.member.permissions.has(PermissionFlagsBits.ManageMessages)) return;
 
     let isViolation = true;
 
-    // نمر على كل رتبة منشنها العضو
     for (const [mRoleId] of mentionedRoles) {
-      // نتحقق: هل الرتبة التي تم منشنها موجودة في الخريطة؟
       if (ROLE_MENTION_MAP[mRoleId]) {
-        // هل العضو يملك هذه الرتبة فعلاً؟
         if (memberRoles.has(mRoleId)) {
           const allowedChannels = ROLE_MENTION_MAP[mRoleId];
           const allowedChannelsList = Array.isArray(allowedChannels) ? allowedChannels : [allowedChannels];
 
-          // هل هو الآن في الشات المخصص لهذه الرتبة؟
           if (allowedChannelsList.includes(message.channel.id)) {
-            isViolation = false; // المنشن سليم
+            isViolation = false; 
           }
         }
       }
     }
 
-    // إذا كان هناك مخالفة (منشن رتبة غير مسموحة، أو في شات غلط، أو @everyone)
     if (isViolation || hasEveryone) {
       await message.delete().catch(() => {});
-      const warn = await message.channel.send(`${message.author}، مسموح لك فقط بمنشن رتبتك الخاصة داخل الشات المخصص لها!`);
+      const warn = await message.channel.send(`${message.author}, you are only allowed to mention your assigned role within its designated channel!`);
       setTimeout(() => warn.delete().catch(() => {}), 5000);
     }
   }
