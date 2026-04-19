@@ -24,8 +24,8 @@ const ROLE_MENTION_MAP = {
 };
 
 const MUTE_DURATIONS_MINUTES = [0, 5, 10, 30, 60];
-const MUTE_ROLE_ID = '1495491723722494062';
-const WELCOME_CHANNEL_ID = 'رقم_الروم_هنا'; // ضع هنا ID روم الترحيب/اللوج
+const MUTE_ROLE_ID = '1493775095028645969'; // تأكد أن هذا ID رتبة الميوت
+const WELCOME_CHANNEL_ID = '1495491723722494062'; // الـ ID اللي انت بعته للروم
 
 const linkViolations = new Map();
 const nsfwViolations = new Map();
@@ -38,7 +38,7 @@ const client = new Client({
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
     GatewayIntentBits.GuildMembers,
-    GatewayIntentBits.GuildInvites, // مهم جداً لنظام الدعوات
+    GatewayIntentBits.GuildInvites, 
   ],
   partials: [Partials.Message, Partials.Channel],
 });
@@ -69,18 +69,18 @@ async function applyProgressiveMute(message, violationsMap, reason, warningText)
   return true;
 }
 
-// جلب الدعوات عند تشغيل البوت
 client.once('ready', async () => {
   console.log(`Bot is online as ${client.user.tag}`);
   
-  client.guilds.cache.forEach(async (guild) => {
+  // تحديث كاش الدعوات عند بدء التشغيل
+  for (const [guildId, guild] of client.guilds.cache) {
     try {
-      const firstInvites = await guild.invites.fetch();
-      invites.set(guild.id, new Collection(firstInvites.map((invite) => [invite.code, invite.uses])));
+      const guildInvites = await guild.invites.fetch();
+      invites.set(guild.id, new Collection(guildInvites.map((invite) => [invite.code, invite.uses])));
     } catch (err) {
       console.error(`Couldn't fetch invites for guild ${guild.id}`);
     }
-  });
+  }
 
   client.user.setPresence({
     status: 'idle',
@@ -88,22 +88,23 @@ client.once('ready', async () => {
   });
 });
 
-// نظام تتبع من قام بالدعوة
 client.on('guildMemberAdd', async (member) => {
   try {
     const newInvites = await member.guild.invites.fetch();
     const oldInvites = invites.get(member.guild.id);
-    const invite = newInvites.find(i => i.uses > (oldInvites.get(i.code) || 0));
     
-    // تحديث الكاش بالقيم الجديدة
+    // البحث عن الشخص اللي اللينك بتاعه استُخدم
+    const invite = newInvites.find(i => i.uses > (oldInvites ? (oldInvites.get(i.code) || 0) : 0));
+    
+    // تحديث الكاش
     invites.set(member.guild.id, new Collection(newInvites.map((invite) => [invite.code, invite.uses])));
 
     const logChannel = member.guild.channels.cache.get(WELCOME_CHANNEL_ID);
     if (logChannel) {
       if (invite) {
-        logChannel.send(`✅ **${member.user.tag}** انضم للسيرفر!\n👤 بواسطة: **${invite.inviter.tag}**\n📊 عدد دعواته الحالية: **${invite.uses}**`);
+        await logChannel.send(`✅ **${member.user.tag}** انضم للسيرفر!\n👤 بواسطة: **${invite.inviter.tag}**\n📊 عدد دعواته الآن: **${invite.uses}**`);
       } else {
-        logChannel.send(`✅ **${member.user.tag}** انضم للسيرفر (غير معروف من دعاه).`);
+        await logChannel.send(`✅ **${member.user.tag}** انضم للسيرفر (غير معروف من دعاه).`);
       }
     }
   } catch (err) {
@@ -117,44 +118,34 @@ client.on('messageCreate', async (message) => {
   const memberRoles = message.member?.roles?.cache;
   if (!memberRoles) return;
 
-  // أمر فحص عدد الدعوات الشخصي
+  // أمر فحص الدعوات
   if (message.content.startsWith('!invites')) {
     const target = message.mentions.members.first() || message.member;
-    const guildInvites = await message.guild.invites.fetch();
-    const userInvites = guildInvites.filter(i => i.inviter && i.inviter.id === target.id);
-    let count = 0;
-    userInvites.forEach(i => count += i.uses);
-    return message.reply(`👤 **${target.user.tag}** لديه **${count}** دعوة حالياً.`);
+    try {
+      const guildInvites = await message.guild.invites.fetch();
+      const userInvites = guildInvites.filter(i => i.inviter && i.inviter.id === target.id);
+      let count = 0;
+      userInvites.forEach(i => count += i.uses);
+      return message.reply(`👤 **${target.user.tag}** عنده **${count}** دعوة.`);
+    } catch (e) {
+      console.error(e);
+    }
   }
 
-  // ===== فلتر المحتوى +18 =====
-  const hasAttachment = message.attachments.size > 0;
-  const hasSticker = message.stickers.size > 0;
+  // فلاتر الحماية (NSFW, Links, Mentions)
   const contentLower = message.content.toLowerCase();
   const hasNsfwKeyword = NSFW_KEYWORDS.some(kw => contentLower.includes(kw));
 
-  if (hasAttachment || hasSticker || hasNsfwKeyword) {
-    try {
-      const handled = await applyProgressiveMute(message, nsfwViolations, 'Sending +18 content', '+18 content is not allowed here.');
-      if (handled) return;
-    } catch (err) {
-      console.error('Error handling NSFW content:', err.message);
-    }
+  if (message.attachments.size > 0 || message.stickers.size > 0 || hasNsfwKeyword) {
+    await applyProgressiveMute(message, nsfwViolations, 'Sending NSFW content', '+18 content is not allowed.');
   }
 
-  // ===== فلتر الروابط =====
   if (URL_REGEX.test(message.content)) {
     URL_REGEX.lastIndex = 0;
-    try {
-      const handled = await applyProgressiveMute(message, linkViolations, 'Sending links', 'Links are not allowed here.');
-      if (handled) return;
-    } catch (err) {
-      console.error('Error handling link:', err.message);
-    }
+    await applyProgressiveMute(message, linkViolations, 'Sending links', 'Links are not allowed.');
   }
   URL_REGEX.lastIndex = 0;
 
-  // ===== فلتر المنشن =====
   const mentionedRoles = message.mentions.roles;
   if (mentionedRoles.size > 0) {
     for (const [sourceRoleId, allowedTargetRoleId] of Object.entries(ROLE_MENTION_MAP)) {
@@ -166,14 +157,6 @@ client.on('messageCreate', async (message) => {
         const warning = await message.channel.send(`You are only allowed to mention <@&${allowedTargetRoleId}>.\n\n${message.author}`);
         return setTimeout(() => warning.delete().catch(() => {}), 5000);
       }
-
-      const textOnly = message.content.replace(/<@&\d+>/g, '').trim();
-      if (textOnly.length === 0) {
-        await message.delete().catch(() => {});
-        const warning = await message.channel.send(`You must include a message with your mention.\n\n${message.author}`);
-        return setTimeout(() => warning.delete().catch(() => {}), 5000);
-      }
-      return;
     }
   }
 });
