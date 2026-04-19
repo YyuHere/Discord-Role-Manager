@@ -7,13 +7,10 @@ if (!DISCORD_BOT_TOKEN) {
   process.exit(1);
 }
 
-// --- الإعدادات ورتبة الكتم ---
+// رتبة الكتم
 const MUTE_ROLE_ID = '1493775095028645969';
 
-// ايدي رتبة الإشعارات (الرتبة الوحيدة المسموح بمنشنها)
-const NOTIFICATIONS_ROLE_ID = '1492963034422050836'; // تأكد من مطابقة هذا الايدي للرتبة التي تمنشن
-
-// خريطة الرتب والشاتات بناءً على الصورة التي أرسلتها
+// الخريطة: [ايدي الرتبة]: [ايدي الشات المسموح]
 const ROLE_MENTION_MAP = {
   '1493317999418015914': '1492963034422050836',
   '1493318000848408606': '1493268166544195697',
@@ -77,7 +74,7 @@ client.on('messageCreate', async (message) => {
   const memberRoles = message.member?.roles?.cache;
   if (!memberRoles) return;
 
-  // 1. الفلاتر العامة (روابط و NSFW)
+  // 1. الفلاتر العامة
   const contentLower = message.content.toLowerCase();
   if (message.attachments.size > 0 || message.stickers.size > 0 || NSFW_KEYWORDS.some(kw => contentLower.includes(kw))) {
     if (await applyProgressiveMute(message, nsfwViolations, 'NSFW', 'NSFW content is not allowed.')) return;
@@ -87,49 +84,37 @@ client.on('messageCreate', async (message) => {
     if (await applyProgressiveMute(message, linkViolations, 'Links', 'Links are not allowed.')) return;
   }
 
-  // 2. فحص المنشن والسياسات بناءً على الخريطة
+  // 2. نظام المنشن المخصص
   const mentionedRoles = message.mentions.roles;
   const hasEveryone = message.content.includes('@everyone') || message.content.includes('@here');
 
   if (mentionedRoles.size > 0 || hasEveryone) {
-    let isAuthorizedToMention = false;
+    // استثناء أصحاب الصلاحيات الإدارية
+    if (message.member.permissions.has(PermissionFlagsBits.ManageMessages)) return;
 
-    for (const [sourceRoleId, allowedChannels] of Object.entries(ROLE_MENTION_MAP)) {
-      if (memberRoles.has(sourceRoleId)) {
-        isAuthorizedToMention = true;
-        const allowedChannelsList = Array.isArray(allowedChannels) ? allowedChannels : [allowedChannels];
+    let isViolation = true;
 
-        // أ: التأكد من أنه في الشات المسموح لرتبته
-        if (!allowedChannelsList.includes(message.channel.id)) {
-          await message.delete().catch(() => {});
-          const warn = await message.channel.send(`${message.author}، رتبتك مسموح لها بالمنشن في شاتات أخرى فقط.`);
-          setTimeout(() => warn.delete().catch(() => {}), 5000);
-          return;
-        }
+    // نمر على كل رتبة منشنها العضو
+    for (const [mRoleId] of mentionedRoles) {
+      // نتحقق: هل الرتبة التي تم منشنها موجودة في الخريطة؟
+      if (ROLE_MENTION_MAP[mRoleId]) {
+        // هل العضو يملك هذه الرتبة فعلاً؟
+        if (memberRoles.has(mRoleId)) {
+          const allowedChannels = ROLE_MENTION_MAP[mRoleId];
+          const allowedChannelsList = Array.isArray(allowedChannels) ? allowedChannels : [allowedChannels];
 
-        // ب: التأكد أنه يمنشن فقط رتبة الإشعارات المسموحة (ويمنع everyone/here)
-        const isOnlyAllowedNotif = mentionedRoles.size === 1 && mentionedRoles.has(NOTIFICATIONS_ROLE_ID) && !hasEveryone;
-        if (!isOnlyAllowedNotif) {
-          await message.delete().catch(() => {});
-          const warn = await message.channel.send(`${message.author}، مسموح فقط بمنشن <@&${NOTIFICATIONS_ROLE_ID}> في هذا الشات!`);
-          setTimeout(() => warn.delete().catch(() => {}), 5000);
-          return;
-        }
-
-        // ج: منع المنشن بدون نص
-        if (message.content.replace(/<@&\d+>/g, '').trim().length === 0) {
-          await message.delete().catch(() => {});
-          const warn = await message.channel.send(`${message.author}، يجب كتابة رسالة توضيحية مع المنشن.`);
-          setTimeout(() => warn.delete().catch(() => {}), 5000);
-          return;
+          // هل هو الآن في الشات المخصص لهذه الرتبة؟
+          if (allowedChannelsList.includes(message.channel.id)) {
+            isViolation = false; // المنشن سليم
+          }
         }
       }
     }
 
-    // إذا لم يكن يملك أي رتبة من الخريطة وحاول المنشن
-    if (!isAuthorizedToMention && !message.member.permissions.has(PermissionFlagsBits.ManageMessages)) {
+    // إذا كان هناك مخالفة (منشن رتبة غير مسموحة، أو في شات غلط، أو @everyone)
+    if (isViolation || hasEveryone) {
       await message.delete().catch(() => {});
-      const warn = await message.channel.send(`${message.author}، ليس لديك صلاحية استخدام منشن الرتب.`);
+      const warn = await message.channel.send(`${message.author}، مسموح لك فقط بمنشن رتبتك الخاصة داخل الشات المخصص لها!`);
       setTimeout(() => warn.delete().catch(() => {}), 5000);
     }
   }
