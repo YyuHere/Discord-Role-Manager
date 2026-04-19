@@ -7,7 +7,11 @@ if (!DISCORD_BOT_TOKEN) {
   process.exit(1);
 }
 
-// Map: رول اللي عنده صلاحية → الرول اللي مسموح يمنشنه بس
+// --- الإعدادات الجديدة ---
+const ANNOUNCEMENT_CHANNEL_ID = 'ضع_هنا_ID_الروم_المعينة'; 
+const NOTIFICATIONS_ROLE_ID = 'ضع_هنا_ID_رول_الاشعارات';
+// -----------------------
+
 const ROLE_MENTION_MAP = {
   '1493272544252399648': '1493317999418015914',
   '1493272676603658310': '1493318000848408606',
@@ -20,23 +24,13 @@ const ROLE_MENTION_MAP = {
   '1493273292704977051': '1493318000181252107',
 };
 
-// مدد الكتم التدريجية بالدقائق: مخالفة 1 = حذف بس، 2 = 5 دقائق، 3 = 10، 4 = 30، 5+ = 60
 const MUTE_DURATIONS_MINUTES = [0, 5, 10, 30, 60];
-
 const MUTE_ROLE_ID = '1493775095028645969';
 
-// تتبع مخالفات الروابط لكل يوزر
 const linkViolations = new Map();
-
-// تتبع مخالفات المحتوى +18 لكل يوزر
 const nsfwViolations = new Map();
-
 const URL_REGEX = /https?:\/\/\S+|discord\.gg\/\S+|www\.\S+\.\S+/gi;
-
-// كلمات مفتاحية للمحتوى الصريح
-const NSFW_KEYWORDS = [
-  'nsfw', '+18', '18+', 'xxx', 'porn', 'sex', 'nude', 'naked',
-];
+const NSFW_KEYWORDS = ['nsfw', '+18', '18+', 'xxx', 'porn', 'sex', 'nude', 'naked'];
 
 const client = new Client({
   intents: [
@@ -48,12 +42,10 @@ const client = new Client({
   partials: [Partials.Message, Partials.Channel],
 });
 
-// دالة مشتركة لتطبيق الميوت التدريجي
 async function applyProgressiveMute(message, violationsMap, reason, warningText) {
-  const canManageMessages = message.member.permissions.has(PermissionFlagsBits.ManageMessages);
-  if (canManageMessages) return false;
+  if (message.member.permissions.has(PermissionFlagsBits.ManageMessages)) return false;
 
-  await message.delete();
+  await message.delete().catch(() => {});
 
   const userId = message.author.id;
   const violations = (violationsMap.get(userId) || 0) + 1;
@@ -63,7 +55,7 @@ async function applyProgressiveMute(message, violationsMap, reason, warningText)
   const muteDuration = MUTE_DURATIONS_MINUTES[muteIndex];
 
   if (muteDuration > 0) {
-    await message.member.roles.add(MUTE_ROLE_ID, reason);
+    await message.member.roles.add(MUTE_ROLE_ID, reason).catch(() => {});
     setTimeout(() => {
       message.member.roles.remove(MUTE_ROLE_ID, 'Mute duration expired').catch(() => {});
     }, muteDuration * 60 * 1000);
@@ -72,104 +64,86 @@ async function applyProgressiveMute(message, violationsMap, reason, warningText)
     );
     setTimeout(() => warning.delete().catch(() => {}), 7000);
   } else {
-    const warning = await message.channel.send(
-      `${warningText}\n\n${message.author}`
-    );
+    const warning = await message.channel.send(`${warningText}\n\n${message.author}`);
     setTimeout(() => warning.delete().catch(() => {}), 5000);
   }
-
   return true;
 }
 
-client.once('clientReady', () => {
+client.once('ready', () => {
   console.log(`Bot is online as ${client.user.tag}`);
   client.user.setPresence({
-    status: 'idel',
+    status: 'idle',
     activities: [{ name: 'Helpr', type: 3 }],
   });
 });
 
 client.on('messageCreate', async (message) => {
-  if (message.author.bot) return;
+  if (message.author.bot || !message.guild) return;
 
   const memberRoles = message.member?.roles?.cache;
   if (!memberRoles) return;
 
-  // ===== فلتر المحتوى +18 (صور، ستيكرات، ملفات، كلمات صريحة) =====
-  const hasAttachment = message.attachments.size > 0;
-  const hasSticker = message.stickers.size > 0;
+  // 1. فلتر المحتوى +18
   const contentLower = message.content.toLowerCase();
-  const hasNsfwKeyword = NSFW_KEYWORDS.some(kw => contentLower.includes(kw));
-
-  if (hasAttachment || hasSticker || hasNsfwKeyword) {
-    try {
-      const handled = await applyProgressiveMute(
-        message,
-        nsfwViolations,
-        'Sending +18 content is not allowed',
-        '+18 content is not allowed here.'
-      );
-      if (handled) return;
-    } catch (err) {
-      console.error('Error handling NSFW content:', err.message);
-      return;
-    }
+  if (message.attachments.size > 0 || message.stickers.size > 0 || NSFW_KEYWORDS.some(kw => contentLower.includes(kw))) {
+    if (await applyProgressiveMute(message, nsfwViolations, 'NSFW Content', '+18 content is not allowed here.')) return;
   }
 
-  // ===== فلتر الروابط =====
+  // 2. فلتر الروابط
   if (URL_REGEX.test(message.content)) {
     URL_REGEX.lastIndex = 0;
-    try {
-      const handled = await applyProgressiveMute(
-        message,
-        linkViolations,
-        'Sending links is not allowed',
-        'Links are not allowed here.'
-      );
-      if (handled) return;
-    } catch (err) {
-      console.error('Error handling link:', err.message);
-      return;
+    if (await applyProgressiveMute(message, linkViolations, 'Links Prohibited', 'Links are not allowed here.')) return;
+  }
+
+  // 3. فلتر المنشن (تعديلك المطلوب هنا)
+  const mentionedRoles = message.mentions.roles;
+  const mentionedUsers = message.mentions.users;
+  const hasEveryone = message.content.includes('@everyone') || message.content.includes('@here');
+
+  // --- المنطق الخاص بالروم المعينة ---
+  if (message.channel.id === ANNOUNCEMENT_CHANNEL_ID) {
+    // إذا وجد أي منشن (رول، شخص، أو everyone)
+    if (mentionedRoles.size > 0 || mentionedUsers.size > 0 || hasEveryone) {
+      // التحقق: هل المنشن الوحيد الموجود هو رول الإشعارات؟
+      const isOnlyNotificationRole = mentionedRoles.size === 1 && mentionedRoles.has(NOTIFICATIONS_ROLE_ID) && mentionedUsers.size === 0 && !hasEveryone;
+
+      if (!isOnlyNotificationRole) {
+        try {
+          await message.delete().catch(() => {});
+          const warning = await message.channel.send(
+            `في هذه الروم، مسموح فقط بمنشن <@&${NOTIFICATIONS_ROLE_ID}>.\n\n${message.author}`
+          );
+          setTimeout(() => warning.delete().catch(() => {}), 5000);
+        } catch (err) {
+          console.error('Error in specific channel check:', err.message);
+        }
+        return; 
+      }
     }
   }
-  URL_REGEX.lastIndex = 0;
 
-  // ===== فلتر المنشن =====
-  const mentionedRoles = message.mentions.roles;
-  if (mentionedRoles.size === 0) return;
-
-  for (const [sourceRoleId, allowedTargetRoleId] of Object.entries(ROLE_MENTION_MAP)) {
-    if (!memberRoles.has(sourceRoleId)) continue;
-
-    const hasDisallowedMention = mentionedRoles.some(role => role.id !== allowedTargetRoleId);
-
-    if (hasDisallowedMention) {
-      try {
-        await message.delete();
-        const warning = await message.channel.send(
-          `You are only allowed to mention <@&${allowedTargetRoleId}>.\n\n${message.author}`
-        );
-        setTimeout(() => warning.delete().catch(() => {}), 5000);
-      } catch (err) {
-        console.error('Error handling mention:', err.message);
-      }
-      return;
-    }
-
-    // المنشن مسموح - نتحقق إن في نص مع المنشن
-    const textOnly = message.content.replace(/<@&\d+>/g, '').trim();
-    if (textOnly.length === 0) {
-      try {
-        await message.delete();
-        const warning = await message.channel.send(
-          `You must include a message with your mention.\n\n${message.author}`
-        );
-        setTimeout(() => warning.delete().catch(() => {}), 5000);
-      } catch (err) {
-        console.error('Error handling mention:', err.message);
+  // --- المنطق القديم (باقي الرومات) بناءً على ROLE_MENTION_MAP ---
+  if (mentionedRoles.size > 0) {
+    for (const [sourceRoleId, allowedTargetRoleId] of Object.entries(ROLE_MENTION_MAP)) {
+      if (memberRoles.has(sourceRoleId)) {
+        const hasDisallowedMention = mentionedRoles.some(role => role.id !== allowedTargetRoleId);
+        if (hasDisallowedMention) {
+          await message.delete().catch(() => {});
+          const warning = await message.channel.send(`You are only allowed to mention <@&${allowedTargetRoleId}>.\n\n${message.author}`);
+          setTimeout(() => warning.delete().catch(() => {}), 5000);
+          return;
+        }
+        
+        // منع المنشن بدون نص
+        if (message.content.replace(/<@&\d+>/g, '').trim().length === 0) {
+          await message.delete().catch(() => {});
+          const warning = await message.channel.send(`You must include a message with your mention.\n\n${message.author}`);
+          setTimeout(() => warning.delete().catch(() => {}), 5000);
+          return;
+        }
       }
     }
-    return;
   }
 });
 
