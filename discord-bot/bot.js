@@ -1,16 +1,17 @@
-import { Client, GatewayIntentBits, Partials, PermissionFlagsBits, Collection } from 'discord.js';
+import { Client, GatewayIntentBits, Partials, PermissionFlagsBits, Collection, ChannelType } from 'discord.js';
 
 const DISCORD_BOT_TOKEN = process.env.DISCORD_BOT_TOKEN;
+const PREFIX = '!'; // يمكنك تغيير البريفكس من هنا
 
 if (!DISCORD_BOT_TOKEN) {
   console.error('Missing DISCORD_BOT_TOKEN');
   process.exit(1);
 }
 
-// إعدادات القنوات والرواتب
 const MUTE_ROLE_ID = '1493775095028645969';
 const WELCOME_CHANNEL_ID = '1495491723722494062';
 
+// خريطة المنشن (كما هي في كودك)
 const ROLE_MENTION_MAP = {
   '1493317999418015914': '1492963034422050836',
   '1493318000848408606': '1493268166544195697',
@@ -23,18 +24,15 @@ const ROLE_MENTION_MAP = {
   '1493657460811235500': '1493270221580931162',
 };
 
-// --- إعدادات الحماية من السبام ---
-const spamViolations = new Map(); // لتتبع عدد مرات مخالفة السبام
-const messageLog = new Map(); // لتتبع محتوى الرسائل وتوقيتها
-const MUTE_DURATIONS_MINUTES = [5, 10, 30, 60, 1440]; // 5د، 10د، 30د، ساعة، يوم
-const SPAM_THRESHOLD = 4; // عدد الرسائل المسموحة قبل الحذف
-const SPAM_INTERVAL = 5000; // الفترة الزمنية (5 ثواني)
-
+const spamViolations = new Map();
+const messageLog = new Map();
+const MUTE_DURATIONS_MINUTES = [5, 10, 30, 60, 1440];
+const SPAM_THRESHOLD = 4;
+const SPAM_INTERVAL = 5000;
 const linkViolations = new Map();
 const nsfwViolations = new Map();
 const URL_REGEX = /https?:\/\/\S+|discord\.gg\/\S+|www\.\S+\.\S+/gi;
 const NSFW_KEYWORDS = ['nsfw', '+18', '18+', 'xxx', 'porn', 'sex', 'nude', 'naked'];
-
 const invites = new Collection();
 
 const client = new Client({
@@ -48,8 +46,29 @@ const client = new Client({
   partials: [Partials.Message, Partials.Channel],
 });
 
+// دالة لتحديث تصاريح الرتبة في كل القنوات
+async function setupMuteRolePermissions(guild) {
+  const muteRole = guild.roles.cache.get(MUTE_ROLE_ID);
+  if (!muteRole) return;
+
+  guild.channels.cache.forEach(async (channel) => {
+    try {
+      // منع الإرسال، إضافة التفاعلات، وإنشاء الخيوط
+      await channel.permissionOverwrites.edit(muteRole, {
+        SendMessages: false,
+        AddReactions: false,
+        CreatePublicThreads: false,
+        CreatePrivateThreads: false,
+      });
+    } catch (err) {
+      console.error(`Could not update permissions for channel: ${channel.name}`);
+    }
+  });
+}
+
 client.once('ready', async () => {
   console.log(`Bot is online as ${client.user.tag}`);
+  // جلب الانفايتات عند التشغيل
   for (const [guildId, guild] of client.guilds.cache) {
     try {
       const guildInvites = await guild.invites.fetch();
@@ -60,7 +79,7 @@ client.once('ready', async () => {
   }
 });
 
-// دالة الميوت المتطور (المعدلة لتشمل زيادة المدة)
+// دالة الميوت المتطور (للنظام التلقائي)
 async function applyProgressiveMute(message, violationsMap, reason, warningText) {
   if (message.member.permissions.has(PermissionFlagsBits.ManageMessages)) return false;
 
@@ -87,36 +106,70 @@ async function applyProgressiveMute(message, violationsMap, reason, warningText)
 client.on('messageCreate', async (message) => {
   if (message.author.bot || !message.guild) return;
 
-  // استثناء الإدارة من الفحص
+  // --- أوامر الميوت والفك اليدوية ---
+  if (message.content.startsWith(PREFIX)) {
+    const args = message.content.slice(PREFIX.length).trim().split(/ +/);
+    const command = args.shift().toLowerCase();
+
+    // أمر الميوت: !mute @user 10m reason
+    if (command === 'mute') {
+      if (!message.member.permissions.has(PermissionFlagsBits.ModerateMembers)) return;
+
+      const target = message.mentions.members.first();
+      const duration = args[1]; // مثال: 10m
+      const reason = args.slice(2).join(' ') || 'No reason provided';
+
+      if (!target) return message.reply('الرجاء منشن الشخص المراد إعطاؤه ميوت.');
+      if (!duration || !duration.endsWith('m')) return message.reply('الرجاء تحديد الوقت بالدقائق، مثال: `!mute @user 10m`');
+
+      const minutes = parseInt(duration);
+      if (isNaN(minutes)) return message.reply('الوقت غير صالح.');
+
+      await setupMuteRolePermissions(message.guild); // تحديث الرومات للتأكد من منع الرتبة
+      await target.roles.add(MUTE_ROLE_ID).catch(e => message.reply("خطأ في إضافة الرتبة."));
+      
+      message.reply(`تم إعطاء ميوت لـ ${target.user.tag} لمدة ${minutes} دقيقة.`);
+
+      setTimeout(() => {
+        target.roles.remove(MUTE_ROLE_ID).catch(() => {});
+      }, minutes * 60 * 1000);
+      return;
+    }
+
+    // أمر فك الميوت: !unmute @user
+    if (command === 'unmute') {
+      if (!message.member.permissions.has(PermissionFlagsBits.ModerateMembers)) return;
+      const target = message.mentions.members.first();
+      if (!target) return message.reply('الرجاء منشن الشخص.');
+
+      await target.roles.remove(MUTE_ROLE_ID).catch(e => message.reply("هذا الشخص لا يملك رتبة ميوت."));
+      message.reply(`تم فك الميوت عن ${target.user.tag}.`);
+      return;
+    }
+  }
+
+  // --- نظام الحماية (السبام، الروابط، المنشن) ---
   if (message.member.permissions.has(PermissionFlagsBits.ManageMessages)) return;
 
   const userId = message.author.id;
   const now = Date.now();
 
-  // --- نظام فحص السبام (التكرار والسرعة) ---
-  if (!messageLog.has(userId)) {
-    messageLog.set(userId, []);
-  }
-
+  if (!messageLog.has(userId)) messageLog.set(userId, []);
   const userData = messageLog.get(userId);
   userData.push({ timestamp: now, content: message.content });
 
-  // تنظيف الرسائل القديمة من السجل (خارج نطاق الـ 5 ثواني)
   const recentMessages = userData.filter(msg => now - msg.timestamp < SPAM_INTERVAL);
   messageLog.set(userId, recentMessages);
 
-  // 1. فحص تكرار نفس الرسالة
   const duplicateMessages = recentMessages.filter(msg => msg.content === message.content);
   
-  // 2. فحص سرعة الإرسال (حتى لو كلام مختلف)
   if (duplicateMessages.length >= 3 || recentMessages.length >= SPAM_THRESHOLD) {
-    if (await applyProgressiveMute(message, spamViolations, 'Anti-Spam', 'الرجاء التوقف عن التكرار/السبام!')) {
-      messageLog.delete(userId); // تصغير السجل بعد العقوبة
+    if (await applyProgressiveMute(message, spamViolations, 'Anti-Spam', 'الرجاء التوقف عن التكرار!')) {
+      messageLog.delete(userId);
       return;
     }
   }
 
-  // --- فحص الرواتب والمنشن (الكود القديم الخاص بك) ---
   const contentLower = message.content.toLowerCase();
   if (NSFW_KEYWORDS.some(kw => contentLower.includes(kw))) {
     if (await applyProgressiveMute(message, nsfwViolations, 'NSFW Content', 'محتوى غير لائق!')) return;
@@ -124,10 +177,10 @@ client.on('messageCreate', async (message) => {
 
   if (URL_REGEX.test(message.content)) {
     URL_REGEX.lastIndex = 0;
-    if (await applyProgressiveMute(message, linkViolations, 'External Links', 'الروابط ممنوعة هنا!')) return;
+    if (await applyProgressiveMute(message, linkViolations, 'External Links', 'الروابط ممنوعة!')) return;
   }
 
-  // فحص المنشن العشوائي
+  // فحص المنشن
   const mentionedRoles = message.mentions.roles;
   const hasEveryone = message.content.includes('@everyone') || message.content.includes('@here');
 
@@ -144,13 +197,13 @@ client.on('messageCreate', async (message) => {
     }
     if (isViolation || hasEveryone) {
       await message.delete().catch(() => {});
-      const warn = await message.channel.send(`${message.author}, لا يمكنك عمل منشن لهذه الرتبة في هذه القناة!`);
+      const warn = await message.channel.send(`${message.author}, لا يمكنك عمل منشن لهذه الرتبة هنا!`);
       setTimeout(() => warn.delete().catch(() => {}), 5000);
     }
   }
 });
 
-// (باقي كود الترحيب واللفلات كما هو دون تغيير)
+// باقي أكواد الانفايت والترحيب...
 client.on('inviteCreate', (invite) => {
   const guildInvites = invites.get(invite.guild.id);
   if (guildInvites) guildInvites.set(invite.code, invite.uses);
