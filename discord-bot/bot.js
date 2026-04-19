@@ -124,7 +124,7 @@ client.on('messageCreate', async (message) => {
     }
   }
 
-  // 2. !mmute Command (Admin Only) - Using Safe Unicode for 🔒
+  // 2. !mmute Command (Admin Only) - Using Safe Unicode for 🤐 
   if (message.content.startsWith('!mmute')) {
     if (!member.permissions.has(PermissionFlagsBits.Administrator)) return;
     const target = message.mentions.members.first();
@@ -133,7 +133,7 @@ client.on('messageCreate', async (message) => {
     return message.channel.send(`\u{1F512} ${target} has been muted by Admin.`);
   }
 
-  // 3. !uunmute Command (Admin Only) - Using Safe Unicode for 🔓
+  // 3. !uunmute Command (Admin Only) - Using Safe Unicode for 💬 
   if (message.content.startsWith('!uunmute')) {
     if (!member.permissions.has(PermissionFlagsBits.Administrator)) return;
     const target = message.mentions.members.first();
