@@ -11,7 +11,10 @@ if (!DISCORD_BOT_TOKEN) {
 const invites = new Collection();
 const spamTrack = new Map(); 
 const spamViolations = new Map(); 
+const linkViolations = new Map();
+const nsfwViolations = new Map();
 
+// Configuration
 const ROLE_MENTION_MAP = {
   '1493272544252399648': '1493317999418015914',
   '1493272676603658310': '1493318000848408606',
@@ -28,8 +31,6 @@ const MUTE_DURATIONS_MINUTES = [0, 5, 10, 30, 60];
 const MUTE_ROLE_ID = '1493775095028645969'; 
 const WELCOME_CHANNEL_ID = '1495491723722494062'; 
 
-const linkViolations = new Map();
-const nsfwViolations = new Map();
 const URL_REGEX = /https?:\/\/\S+|discord\.gg\/\S+|www\.\S+\.\S+/gi;
 const NSFW_KEYWORDS = ['nsfw', '+18', '18+', 'xxx', 'porn', 'sex', 'nude', 'naked'];
 
@@ -101,11 +102,10 @@ client.on('guildMemberAdd', async (member) => {
 
 client.on('messageCreate', async (message) => {
   if (message.author.bot || !message.guild) return;
-
   const member = message.member;
   if (!member) return;
 
-  // ===== Anti-Spam =====
+  // 1. Anti-Spam
   if (!member.permissions.has(PermissionFlagsBits.Administrator)) {
     const now = Date.now();
     const userData = spamTrack.get(message.author.id) || { lastMsg: 0, count: 0 };
@@ -123,25 +123,25 @@ client.on('messageCreate', async (message) => {
     }
   }
 
-  // ===== !mmute Command (Admin Only) =====
-  if (message.content.startsWith('!mmute')) {
+  // 2. !mmute Command
+  if (message.content.startsWith('mute')) {
     if (!member.permissions.has(PermissionFlagsBits.Administrator)) return;
     const target = message.mentions.members.first();
     if (!target) return message.reply("Please mention a user to mute.");
     await target.roles.add(MUTE_ROLE_ID, 'Manual mute by admin');
-    return message.channel.send(`🤐 ${target} has been muted by Admin.`);
+    return message.channel.send(`🔒 ${target} has been muted by Admin.`);
   }
 
-  // ===== !uunmute Command (Admin Only) =====
-  if (message.content.startsWith('!uunmute')) {
+  // 3. !uunmute Command
+  if (message.content.startsWith('unmute')) {
     if (!member.permissions.has(PermissionFlagsBits.Administrator)) return;
     const target = message.mentions.members.first();
     if (!target) return message.reply("Please mention a user to unmute.");
     await target.roles.remove(MUTE_ROLE_ID, 'Unmute by admin');
-    return message.channel.send(`🔊 ${target} has been unmuted.`);
+    return message.channel.send(`🔓 ${target} has been unmuted.`);
   }
 
-  // ===== !invites Command =====
+  // 4. !invites Command
   if (message.content.startsWith('!invites')) {
     const target = message.mentions.members.first() || message.member;
     const guildInvites = await message.guild.invites.fetch();
@@ -151,15 +151,22 @@ client.on('messageCreate', async (message) => {
     return message.reply(`👤 **${target.user.tag}** has **${count}** invites.`);
   }
 
-  // Filters (NSFW, Links)
+  // 5. الفلاتر النصية (NSFW والروابط)
+  // تم التأكد هنا أن الفحص يعتمد على message.content فقط
   const contentLower = message.content.toLowerCase();
-  if (message.attachments.size > 0 || message.stickers.size > 0 || NSFW_KEYWORDS.some(kw => contentLower.includes(kw))) {
-    await applyProgressiveMute(message, nsfwViolations, 'NSFW content', '+18 content is not allowed.');
-  }
+  
+  if (contentLower.length > 0) {
+    const hasNsfwKeyword = NSFW_KEYWORDS.some(kw => contentLower.includes(kw));
+    if (hasNsfwKeyword) {
+      await applyProgressiveMute(message, nsfwViolations, 'NSFW content', '+18 content is not allowed.');
+      return;
+    }
 
-  if (URL_REGEX.test(message.content)) {
-    URL_REGEX.lastIndex = 0;
-    await applyProgressiveMute(message, linkViolations, 'Links', 'Links are not allowed.');
+    if (URL_REGEX.test(message.content)) {
+      URL_REGEX.lastIndex = 0;
+      await applyProgressiveMute(message, linkViolations, 'Links', 'Links are not allowed.');
+      return;
+    }
   }
 });
 
