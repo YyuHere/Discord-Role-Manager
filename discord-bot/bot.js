@@ -7,10 +7,11 @@ if (!DISCORD_BOT_TOKEN) {
   process.exit(1);
 }
 
-// Invite tracking cache
+// الكاش والخرائط
 const invites = new Collection();
+const spamTrack = new Map(); 
+const spamViolations = new Map(); 
 
-// Role Mention Map
 const ROLE_MENTION_MAP = {
   '1493272544252399648': '1493317999418015914',
   '1493272676603658310': '1493318000848408606',
@@ -71,8 +72,6 @@ async function applyProgressiveMute(message, violationsMap, reason, warningText)
 
 client.once('ready', async () => {
   console.log(`Bot is online as ${client.user.tag}`);
-  
-  // Cache all invites on startup
   for (const [guildId, guild] of client.guilds.cache) {
     try {
       const guildInvites = await guild.invites.fetch();
@@ -81,83 +80,86 @@ client.once('ready', async () => {
       console.error(`Couldn't fetch invites for guild ${guild.id}`);
     }
   }
-
-  client.user.setPresence({
-    status: 'idle',
-    activities: [{ name: 'Helpr', type: 3 }],
-  });
 });
 
-// Invite System Logic (English + Mentions)
 client.on('guildMemberAdd', async (member) => {
   try {
     const newInvites = await member.guild.invites.fetch();
     const oldInvites = invites.get(member.guild.id);
-    
     const invite = newInvites.find(i => i.uses > (oldInvites ? (oldInvites.get(i.code) || 0) : 0));
-    
     invites.set(member.guild.id, new Collection(newInvites.map((invite) => [invite.code, invite.uses])));
-
     const logChannel = member.guild.channels.cache.get(WELCOME_CHANNEL_ID);
     if (logChannel) {
       if (invite) {
-        // Mentioned member and inviter in English
-        await logChannel.send(`✅ **${member}** joined the server!\n👤 Invited by: ${invite.inviter}\n📊 Total Invites: **${invite.uses}**`);
+        await logChannel.send(`✅ **${member}** joined!\n👤 Invited by: ${invite.inviter}\n📊 Total Invites: **${invite.uses}**`);
       } else {
-        await logChannel.send(`✅ **${member}** joined the server! (Inviter unknown)`);
+        await logChannel.send(`✅ **${member}** joined! (Inviter unknown)`);
       }
     }
-  } catch (err) {
-    console.error('Error in guildMemberAdd invite tracking:', err);
-  }
+  } catch (err) {}
 });
 
 client.on('messageCreate', async (message) => {
   if (message.author.bot || !message.guild) return;
 
-  const memberRoles = message.member?.roles?.cache;
-  if (!memberRoles) return;
+  const member = message.member;
+  if (!member) return;
 
-  // Invites check command in English
-  if (message.content.startsWith('!invites')) {
-    const target = message.mentions.members.first() || message.member;
-    try {
-      const guildInvites = await message.guild.invites.fetch();
-      const userInvites = guildInvites.filter(i => i.inviter && i.inviter.id === target.id);
-      let count = 0;
-      userInvites.forEach(i => count += i.uses);
-      return message.reply(`👤 **${target.user.tag}** currently has **${count}** invites.`);
-    } catch (e) {
-      console.error(e);
+  // ===== Anti-Spam =====
+  if (!member.permissions.has(PermissionFlagsBits.Administrator)) {
+    const now = Date.now();
+    const userData = spamTrack.get(message.author.id) || { lastMsg: 0, count: 0 };
+    if (now - userData.lastMsg < 1000) { 
+      userData.count++;
+    } else {
+      userData.count = 1;
+    }
+    userData.lastMsg = now;
+    spamTrack.set(message.author.id, userData);
+
+    if (userData.count >= 4) { 
+      await applyProgressiveMute(message, spamViolations, 'Spamming', 'Stop spamming!');
+      return;
     }
   }
 
-  // Content Filters
-  const contentLower = message.content.toLowerCase();
-  const hasNsfwKeyword = NSFW_KEYWORDS.some(kw => contentLower.includes(kw));
+  // ===== !mmute Command (Admin Only) =====
+  if (message.content.startsWith('!mmute')) {
+    if (!member.permissions.has(PermissionFlagsBits.Administrator)) return;
+    const target = message.mentions.members.first();
+    if (!target) return message.reply("Please mention a user to mute.");
+    await target.roles.add(MUTE_ROLE_ID, 'Manual mute by admin');
+    return message.channel.send(`🤐 ${target} has been muted by Admin.`);
+  }
 
-  if (message.attachments.size > 0 || message.stickers.size > 0 || hasNsfwKeyword) {
-    await applyProgressiveMute(message, nsfwViolations, 'Sending NSFW content', '+18 content is not allowed.');
+  // ===== !uunmute Command (Admin Only) =====
+  if (message.content.startsWith('!uunmute')) {
+    if (!member.permissions.has(PermissionFlagsBits.Administrator)) return;
+    const target = message.mentions.members.first();
+    if (!target) return message.reply("Please mention a user to unmute.");
+    await target.roles.remove(MUTE_ROLE_ID, 'Unmute by admin');
+    return message.channel.send(`🔊 ${target} has been unmuted.`);
+  }
+
+  // ===== !invites Command =====
+  if (message.content.startsWith('!invites')) {
+    const target = message.mentions.members.first() || message.member;
+    const guildInvites = await message.guild.invites.fetch();
+    const userInvites = guildInvites.filter(i => i.inviter && i.inviter.id === target.id);
+    let count = 0;
+    userInvites.forEach(i => count += i.uses);
+    return message.reply(`👤 **${target.user.tag}** has **${count}** invites.`);
+  }
+
+  // Filters (NSFW, Links)
+  const contentLower = message.content.toLowerCase();
+  if (message.attachments.size > 0 || message.stickers.size > 0 || NSFW_KEYWORDS.some(kw => contentLower.includes(kw))) {
+    await applyProgressiveMute(message, nsfwViolations, 'NSFW content', '+18 content is not allowed.');
   }
 
   if (URL_REGEX.test(message.content)) {
     URL_REGEX.lastIndex = 0;
-    await applyProgressiveMute(message, linkViolations, 'Sending links', 'Links are not allowed.');
-  }
-  URL_REGEX.lastIndex = 0;
-
-  const mentionedRoles = message.mentions.roles;
-  if (mentionedRoles.size > 0) {
-    for (const [sourceRoleId, allowedTargetRoleId] of Object.entries(ROLE_MENTION_MAP)) {
-      if (!memberRoles.has(sourceRoleId)) continue;
-
-      const hasDisallowedMention = mentionedRoles.some(role => role.id !== allowedTargetRoleId);
-      if (hasDisallowedMention) {
-        await message.delete().catch(() => {});
-        const warning = await message.channel.send(`You are only allowed to mention <@&${allowedTargetRoleId}>.\n\n${message.author}`);
-        return setTimeout(() => warning.delete().catch(() => {}), 5000);
-      }
-    }
+    await applyProgressiveMute(message, linkViolations, 'Links', 'Links are not allowed.');
   }
 });
 
