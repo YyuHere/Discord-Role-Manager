@@ -7,10 +7,10 @@ if (!DISCORD_BOT_TOKEN) {
   process.exit(1);
 }
 
-// تخزين الدعوات مؤقتاً في الذاكرة
+// Invite tracking cache
 const invites = new Collection();
 
-// Map: رول اللي عنده صلاحية ← الرول اللي مسموح يمنشنه بس
+// Role Mention Map
 const ROLE_MENTION_MAP = {
   '1493272544252399648': '1493317999418015914',
   '1493272676603658310': '1493318000848408606',
@@ -24,8 +24,8 @@ const ROLE_MENTION_MAP = {
 };
 
 const MUTE_DURATIONS_MINUTES = [0, 5, 10, 30, 60];
-const MUTE_ROLE_ID = '1493775095028645969'; // تأكد أن هذا ID رتبة الميوت
-const WELCOME_CHANNEL_ID = '1495491723722494062'; // الـ ID اللي انت بعته للروم
+const MUTE_ROLE_ID = '1493775095028645969'; 
+const WELCOME_CHANNEL_ID = '1495491723722494062'; 
 
 const linkViolations = new Map();
 const nsfwViolations = new Map();
@@ -47,7 +47,7 @@ async function applyProgressiveMute(message, violationsMap, reason, warningText)
   const canManageMessages = message.member.permissions.has(PermissionFlagsBits.ManageMessages);
   if (canManageMessages) return false;
 
-  await message.delete();
+  await message.delete().catch(() => {});
   const userId = message.author.id;
   const violations = (violationsMap.get(userId) || 0) + 1;
   violationsMap.set(userId, violations);
@@ -56,7 +56,7 @@ async function applyProgressiveMute(message, violationsMap, reason, warningText)
   const muteDuration = MUTE_DURATIONS_MINUTES[muteIndex];
 
   if (muteDuration > 0) {
-    await message.member.roles.add(MUTE_ROLE_ID, reason);
+    await message.member.roles.add(MUTE_ROLE_ID, reason).catch(() => {});
     setTimeout(() => {
       message.member.roles.remove(MUTE_ROLE_ID, 'Mute duration expired').catch(() => {});
     }, muteDuration * 60 * 1000);
@@ -72,7 +72,7 @@ async function applyProgressiveMute(message, violationsMap, reason, warningText)
 client.once('ready', async () => {
   console.log(`Bot is online as ${client.user.tag}`);
   
-  // تحديث كاش الدعوات عند بدء التشغيل
+  // Cache all invites on startup
   for (const [guildId, guild] of client.guilds.cache) {
     try {
       const guildInvites = await guild.invites.fetch();
@@ -88,23 +88,23 @@ client.once('ready', async () => {
   });
 });
 
+// Invite System Logic (English + Mentions)
 client.on('guildMemberAdd', async (member) => {
   try {
     const newInvites = await member.guild.invites.fetch();
     const oldInvites = invites.get(member.guild.id);
     
-    // البحث عن الشخص اللي اللينك بتاعه استُخدم
     const invite = newInvites.find(i => i.uses > (oldInvites ? (oldInvites.get(i.code) || 0) : 0));
     
-    // تحديث الكاش
     invites.set(member.guild.id, new Collection(newInvites.map((invite) => [invite.code, invite.uses])));
 
     const logChannel = member.guild.channels.cache.get(WELCOME_CHANNEL_ID);
     if (logChannel) {
       if (invite) {
-        await logChannel.send(`✅ **${member.user.tag}** انضم للسيرفر!\n👤 بواسطة: **${invite.inviter.tag}**\n📊 عدد دعواته الآن: **${invite.uses}**`);
+        // Mentioned member and inviter in English
+        await logChannel.send(`✅ **${member}** joined the server!\n👤 Invited by: ${invite.inviter}\n📊 Total Invites: **${invite.uses}**`);
       } else {
-        await logChannel.send(`✅ **${member.user.tag}** انضم للسيرفر (غير معروف من دعاه).`);
+        await logChannel.send(`✅ **${member}** joined the server! (Inviter unknown)`);
       }
     }
   } catch (err) {
@@ -118,7 +118,7 @@ client.on('messageCreate', async (message) => {
   const memberRoles = message.member?.roles?.cache;
   if (!memberRoles) return;
 
-  // أمر فحص الدعوات
+  // Invites check command in English
   if (message.content.startsWith('!invites')) {
     const target = message.mentions.members.first() || message.member;
     try {
@@ -126,13 +126,13 @@ client.on('messageCreate', async (message) => {
       const userInvites = guildInvites.filter(i => i.inviter && i.inviter.id === target.id);
       let count = 0;
       userInvites.forEach(i => count += i.uses);
-      return message.reply(`👤 **${target.user.tag}** عنده **${count}** دعوة.`);
+      return message.reply(`👤 **${target.user.tag}** currently has **${count}** invites.`);
     } catch (e) {
       console.error(e);
     }
   }
 
-  // فلاتر الحماية (NSFW, Links, Mentions)
+  // Content Filters
   const contentLower = message.content.toLowerCase();
   const hasNsfwKeyword = NSFW_KEYWORDS.some(kw => contentLower.includes(kw));
 
