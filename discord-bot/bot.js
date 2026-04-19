@@ -7,11 +7,14 @@ if (!DISCORD_BOT_TOKEN) {
   process.exit(1);
 }
 
-// الكاش والخرائط
+// Cache and Maps
 const invites = new Collection();
 const spamTrack = new Map(); 
 const spamViolations = new Map(); 
+const linkViolations = new Map();
+const nsfwViolations = new Map();
 
+// Configuration
 const ROLE_MENTION_MAP = {
   '1493272544252399648': '1493317999418015914',
   '1493272676603658310': '1493318000848408606',
@@ -28,8 +31,6 @@ const MUTE_DURATIONS_MINUTES = [0, 5, 10, 30, 60];
 const MUTE_ROLE_ID = '1493775095028645969'; 
 const WELCOME_CHANNEL_ID = '1495491723722494062'; 
 
-const linkViolations = new Map();
-const nsfwViolations = new Map();
 const URL_REGEX = /https?:\/\/\S+|discord\.gg\/\S+|www\.\S+\.\S+/gi;
 const NSFW_KEYWORDS = ['nsfw', '+18', '18+', 'xxx', 'porn', 'sex', 'nude', 'naked'];
 
@@ -105,7 +106,7 @@ client.on('messageCreate', async (message) => {
   const member = message.member;
   if (!member) return;
 
-  // ===== Anti-Spam (Excludes Admins) =====
+  // 1. Anti-Spam
   if (!member.permissions.has(PermissionFlagsBits.Administrator)) {
     const now = Date.now();
     const userData = spamTrack.get(message.author.id) || { lastMsg: 0, count: 0 };
@@ -123,25 +124,25 @@ client.on('messageCreate', async (message) => {
     }
   }
 
-  // ===== !mmute Command (Admin Only) =====
+  // 2. !mmute Command (Admin Only) - Using Safe Unicode for 🔒
   if (message.content.startsWith('!mmute')) {
     if (!member.permissions.has(PermissionFlagsBits.Administrator)) return;
     const target = message.mentions.members.first();
     if (!target) return message.reply("Please mention a user to mute.");
     await target.roles.add(MUTE_ROLE_ID, 'Manual mute by admin');
-    return message.channel.send(`🔒​ ${target} has been muted by Admin.`);
+    return message.channel.send(`\u{1F512} ${target} has been muted by Admin.`);
   }
 
-  // ===== !uunmute Command (Admin Only) =====
+  // 3. !uunmute Command (Admin Only) - Using Safe Unicode for 🔓
   if (message.content.startsWith('!uunmute')) {
     if (!member.permissions.has(PermissionFlagsBits.Administrator)) return;
     const target = message.mentions.members.first();
     if (!target) return message.reply("Please mention a user to unmute.");
     await target.roles.remove(MUTE_ROLE_ID, 'Unmute by admin');
-    return message.channel.send(`🔓​ ${target} has been unmuted.`);
+    return message.channel.send(`\u{1F513} ${target} has been unmuted.`);
   }
 
-  // ===== !invites Command =====
+  // 4. !invites Command
   if (message.content.startsWith('!invites')) {
     const target = message.mentions.members.first() || message.member;
     const guildInvites = await message.guild.invites.fetch();
@@ -151,23 +152,23 @@ client.on('messageCreate', async (message) => {
     return message.reply(`👤 **${target.user.tag}** has **${count}** invites.`);
   }
 
-  // ===== Filter NSFW Keywords ONLY (Photos Allowed) =====
+  // Filters
   const contentLower = message.content.toLowerCase();
   const hasNsfwKeyword = NSFW_KEYWORDS.some(kw => contentLower.includes(kw));
   if (hasNsfwKeyword) {
     await applyProgressiveMute(message, nsfwViolations, 'NSFW content', '+18 content is not allowed.');
   }
 
-  // ===== Link Filter =====
   if (URL_REGEX.test(message.content)) {
     URL_REGEX.lastIndex = 0;
     await applyProgressiveMute(message, linkViolations, 'Links', 'Links are not allowed.');
   }
   URL_REGEX.lastIndex = 0;
 
-  // ===== Role Mention Filter =====
+  // Role Mention Filter
   const mentionedRoles = message.mentions.roles;
   if (mentionedRoles.size > 0) {
+    const memberRoles = member.roles.cache;
     for (const [sourceRoleId, allowedTargetRoleId] of Object.entries(ROLE_MENTION_MAP)) {
       if (!memberRoles.has(sourceRoleId)) continue;
       const hasDisallowedMention = mentionedRoles.some(role => role.id !== allowedTargetRoleId);
