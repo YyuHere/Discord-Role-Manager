@@ -105,7 +105,7 @@ client.on('messageCreate', async (message) => {
   const member = message.member;
   if (!member) return;
 
-  // ===== Anti-Spam =====
+  // ===== Anti-Spam (Excludes Admins) =====
   if (!member.permissions.has(PermissionFlagsBits.Administrator)) {
     const now = Date.now();
     const userData = spamTrack.get(message.author.id) || { lastMsg: 0, count: 0 };
@@ -124,7 +124,7 @@ client.on('messageCreate', async (message) => {
   }
 
   // ===== !mmute Command (Admin Only) =====
-  if (message.content.startsWith('mute')) {
+  if (message.content.startsWith('!mmute')) {
     if (!member.permissions.has(PermissionFlagsBits.Administrator)) return;
     const target = message.mentions.members.first();
     if (!target) return message.reply("Please mention a user to mute.");
@@ -133,12 +133,12 @@ client.on('messageCreate', async (message) => {
   }
 
   // ===== !uunmute Command (Admin Only) =====
-  if (message.content.startsWith('unmute')) {
+  if (message.content.startsWith('!uunmute')) {
     if (!member.permissions.has(PermissionFlagsBits.Administrator)) return;
     const target = message.mentions.members.first();
     if (!target) return message.reply("Please mention a user to unmute.");
     await target.roles.remove(MUTE_ROLE_ID, 'Unmute by admin');
-    return message.channel.send(`🔊 ${target} has been unmuted.`);
+    return message.channel.send(`💬 ${target} has been unmuted.`);
   }
 
   // ===== !invites Command =====
@@ -151,15 +151,32 @@ client.on('messageCreate', async (message) => {
     return message.reply(`👤 **${target.user.tag}** has **${count}** invites.`);
   }
 
-  // Filters (NSFW, Links)
+  // ===== Filter NSFW Keywords ONLY (Photos Allowed) =====
   const contentLower = message.content.toLowerCase();
-  if (message.attachments.size > 0 || message.stickers.size > 0 || NSFW_KEYWORDS.some(kw => contentLower.includes(kw))) {
+  const hasNsfwKeyword = NSFW_KEYWORDS.some(kw => contentLower.includes(kw));
+  if (hasNsfwKeyword) {
     await applyProgressiveMute(message, nsfwViolations, 'NSFW content', '+18 content is not allowed.');
   }
 
+  // ===== Link Filter =====
   if (URL_REGEX.test(message.content)) {
     URL_REGEX.lastIndex = 0;
     await applyProgressiveMute(message, linkViolations, 'Links', 'Links are not allowed.');
+  }
+  URL_REGEX.lastIndex = 0;
+
+  // ===== Role Mention Filter =====
+  const mentionedRoles = message.mentions.roles;
+  if (mentionedRoles.size > 0) {
+    for (const [sourceRoleId, allowedTargetRoleId] of Object.entries(ROLE_MENTION_MAP)) {
+      if (!memberRoles.has(sourceRoleId)) continue;
+      const hasDisallowedMention = mentionedRoles.some(role => role.id !== allowedTargetRoleId);
+      if (hasDisallowedMention) {
+        await message.delete().catch(() => {});
+        const warning = await message.channel.send(`You are only allowed to mention <@&${allowedTargetRoleId}>.\n\n${message.author}`);
+        return setTimeout(() => warning.delete().catch(() => {}), 5000);
+      }
+    }
   }
 });
 
