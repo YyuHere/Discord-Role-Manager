@@ -24,7 +24,7 @@ const ROLE_MENTION_MAP = {
 };
 
 const MUTE_DURATIONS_MINUTES = [0, 5, 10, 30, 60];
-const MUTE_ROLE_ID = '1493775095028645969';
+const MUTE_ROLE_ID = '1495491723722494062';
 const WELCOME_CHANNEL_ID = 'رقم_الروم_هنا'; // ضع هنا ID روم الترحيب/اللوج
 
 const linkViolations = new Map();
