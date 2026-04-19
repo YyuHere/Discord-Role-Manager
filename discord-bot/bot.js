@@ -129,7 +129,7 @@ client.on('messageCreate', async (message) => {
     const target = message.mentions.members.first();
     if (!target) return message.reply("Please mention a user to mute.");
     await target.roles.add(MUTE_ROLE_ID, 'Manual mute by admin');
-    return message.channel.send(`🤐 ${target} has been muted by Admin.`);
+    return message.channel.send(`🔒​ ${target} has been muted by Admin.`);
   }
 
   // ===== !uunmute Command (Admin Only) =====
@@ -138,7 +138,7 @@ client.on('messageCreate', async (message) => {
     const target = message.mentions.members.first();
     if (!target) return message.reply("Please mention a user to unmute.");
     await target.roles.remove(MUTE_ROLE_ID, 'Unmute by admin');
-    return message.channel.send(`💬 ${target} has been unmuted.`);
+    return message.channel.send(`🔓​ ${target} has been unmuted.`);
   }
 
   // ===== !invites Command =====
