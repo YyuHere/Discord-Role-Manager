@@ -9,7 +9,7 @@ if (!DISCORD_BOT_TOKEN) {
 
 // إعدادات القنوات والرواتب
 const MUTE_ROLE_ID = '1493775095028645969';
-const WELCOME_CHANNEL_ID = '1492963034422050836'; // تأكد من وضع ID القناة الصحيح هنا
+const WELCOME_CHANNEL_ID = '1495491723722494062'; // تأكد من وضع ID القناة الصحيح هنا
 
 const ROLE_MENTION_MAP = {
   '1493317999418015914': '1492963034422050836',
