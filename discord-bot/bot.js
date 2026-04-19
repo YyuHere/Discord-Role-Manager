@@ -124,7 +124,7 @@ client.on('messageCreate', async (message) => {
   }
 
   // ===== !mmute Command (Admin Only) =====
-  if (message.content.startsWith('!mmute')) {
+  if (message.content.startsWith('mute')) {
     if (!member.permissions.has(PermissionFlagsBits.Administrator)) return;
     const target = message.mentions.members.first();
     if (!target) return message.reply("Please mention a user to mute.");
@@ -133,7 +133,7 @@ client.on('messageCreate', async (message) => {
   }
 
   // ===== !uunmute Command (Admin Only) =====
-  if (message.content.startsWith('!uunmute')) {
+  if (message.content.startsWith('unmute')) {
     if (!member.permissions.has(PermissionFlagsBits.Administrator)) return;
     const target = message.mentions.members.first();
     if (!target) return message.reply("Please mention a user to unmute.");
