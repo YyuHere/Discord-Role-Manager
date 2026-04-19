@@ -3,18 +3,15 @@ import { Client, GatewayIntentBits, Partials, PermissionFlagsBits, Collection } 
 const DISCORD_BOT_TOKEN = process.env.DISCORD_BOT_TOKEN;
 
 if (!DISCORD_BOT_TOKEN) {
-  console.error('Missing DISCORD_BOT_TOKEN');
   process.exit(1);
 }
 
-// Cache and Maps
 const invites = new Collection();
 const spamTrack = new Map(); 
 const spamViolations = new Map(); 
 const linkViolations = new Map();
 const nsfwViolations = new Map();
 
-// Configuration
 const ROLE_MENTION_MAP = {
   '1493272544252399648': '1493317999418015914',
   '1493272676603658310': '1493318000848408606',
@@ -46,8 +43,8 @@ const client = new Client({
 });
 
 async function applyProgressiveMute(message, violationsMap, reason, warningText) {
-  const canManageMessages = message.member.permissions.has(PermissionFlagsBits.ManageMessages);
-  if (canManageMessages) return false;
+  const member = message.member;
+  if (!member || member.permissions.has(PermissionFlagsBits.ManageMessages)) return false;
 
   await message.delete().catch(() => {});
   const userId = message.author.id;
@@ -58,28 +55,27 @@ async function applyProgressiveMute(message, violationsMap, reason, warningText)
   const muteDuration = MUTE_DURATIONS_MINUTES[muteIndex];
 
   if (muteDuration > 0) {
-    await message.member.roles.add(MUTE_ROLE_ID, reason).catch(() => {});
+    await member.roles.add(MUTE_ROLE_ID, reason).catch(() => {});
     setTimeout(() => {
-      message.member.roles.remove(MUTE_ROLE_ID, 'Mute duration expired').catch(() => {});
+      member.roles.remove(MUTE_ROLE_ID, 'Mute expired').catch(() => {});
     }, muteDuration * 60 * 1000);
-    const warning = await message.channel.send(`${warningText} You have been muted for **${muteDuration} minutes**.\n\n${message.author}`);
+    const warning = await message.channel.send(`${warningText} You are muted for **${muteDuration}m**.\n${message.author}`);
     setTimeout(() => warning.delete().catch(() => {}), 7000);
   } else {
-    const warning = await message.channel.send(`${warningText}\n\n${message.author}`);
+    const warning = await message.channel.send(`${warningText}\n${message.author}`);
     setTimeout(() => warning.delete().catch(() => {}), 5000);
   }
   return true;
 }
 
-client.once('ready', async () => {
-  console.log(`Bot is online as ${client.user.tag}`);
-  for (const [guildId, guild] of client.guilds.cache) {
+// تعديل الحدث ليتوافق مع التحذير في السجلات
+client.once('ready', async (c) => {
+  console.log(`Bot is online as ${c.user.tag}`);
+  for (const [guildId, guild] of c.guilds.cache) {
     try {
       const guildInvites = await guild.invites.fetch();
-      invites.set(guild.id, new Collection(guildInvites.map((invite) => [invite.code, invite.uses])));
-    } catch (err) {
-      console.error(`Couldn't fetch invites for guild ${guild.id}`);
-    }
+      invites.set(guild.id, new Collection(guildInvites.map(i => [i.code, i.uses])));
+    } catch (err) {}
   }
 });
 
@@ -88,33 +84,26 @@ client.on('guildMemberAdd', async (member) => {
     const newInvites = await member.guild.invites.fetch();
     const oldInvites = invites.get(member.guild.id);
     const invite = newInvites.find(i => i.uses > (oldInvites ? (oldInvites.get(i.code) || 0) : 0));
-    invites.set(member.guild.id, new Collection(newInvites.map((invite) => [invite.code, invite.uses])));
+    invites.set(member.guild.id, new Collection(newInvites.map(i => [i.code, i.uses])));
     const logChannel = member.guild.channels.cache.get(WELCOME_CHANNEL_ID);
     if (logChannel) {
-      if (invite) {
-        await logChannel.send(`✅ **${member}** joined!\n👤 Invited by: ${invite.inviter}\n📊 Total Invites: **${invite.uses}**`);
-      } else {
-        await logChannel.send(`✅ **${member}** joined! (Inviter unknown)`);
-      }
+      const msg = invite ? `✅ **${member}** joined! Invited by: ${invite.inviter}` : `✅ **${member}** joined!`;
+      await logChannel.send(msg);
     }
   } catch (err) {}
 });
 
 client.on('messageCreate', async (message) => {
-  if (message.author.bot || !message.guild) return;
+  if (message.author.bot || !message.guild || !message.member) return;
 
   const member = message.member;
-  if (!member) return;
 
   // 1. Anti-Spam
   if (!member.permissions.has(PermissionFlagsBits.Administrator)) {
     const now = Date.now();
     const userData = spamTrack.get(message.author.id) || { lastMsg: 0, count: 0 };
-    if (now - userData.lastMsg < 1000) { 
-      userData.count++;
-    } else {
-      userData.count = 1;
-    }
+    if (now - userData.lastMsg < 1000) userData.count++;
+    else userData.count = 1;
     userData.lastMsg = now;
     spamTrack.set(message.author.id, userData);
 
@@ -124,60 +113,41 @@ client.on('messageCreate', async (message) => {
     }
   }
 
-  // 2. !mmute Command (Admin Only) - Using Safe Unicode for 🤐 
+  // 2. !mmute - Using Unicode for Lock
   if (message.content.startsWith('!mmute')) {
     if (!member.permissions.has(PermissionFlagsBits.Administrator)) return;
     const target = message.mentions.members.first();
-    if (!target) return message.reply("Please mention a user to mute.");
-    await target.roles.add(MUTE_ROLE_ID, 'Manual mute by admin');
-    return message.channel.send(`\u{1F512} ${target} has been muted by Admin.`);
+    if (!target) return message.reply("Mention someone.");
+    await target.roles.add(MUTE_ROLE_ID).catch(() => {});
+    return message.channel.send(`\u{1F512} ${target} muted.`);
   }
 
-  // 3. !uunmute Command (Admin Only) - Using Safe Unicode for 💬 
+  // 3. !uunmute - Using Unicode for Open Lock
   if (message.content.startsWith('!uunmute')) {
     if (!member.permissions.has(PermissionFlagsBits.Administrator)) return;
     const target = message.mentions.members.first();
-    if (!target) return message.reply("Please mention a user to unmute.");
-    await target.roles.remove(MUTE_ROLE_ID, 'Unmute by admin');
-    return message.channel.send(`\u{1F513} ${target} has been unmuted.`);
+    if (!target) return message.reply("Mention someone.");
+    await target.roles.remove(MUTE_ROLE_ID).catch(() => {});
+    return message.channel.send(`\u{1F513} ${target} unmuted.`);
   }
 
-  // 4. !invites Command
+  // 4. !invites
   if (message.content.startsWith('!invites')) {
     const target = message.mentions.members.first() || message.member;
     const guildInvites = await message.guild.invites.fetch();
-    const userInvites = guildInvites.filter(i => i.inviter && i.inviter.id === target.id);
-    let count = 0;
-    userInvites.forEach(i => count += i.uses);
+    const count = guildInvites.filter(i => i.inviter?.id === target.id).reduce((p, c) => p + c.uses, 0);
     return message.reply(`👤 **${target.user.tag}** has **${count}** invites.`);
   }
 
   // Filters
   const contentLower = message.content.toLowerCase();
-  const hasNsfwKeyword = NSFW_KEYWORDS.some(kw => contentLower.includes(kw));
-  if (hasNsfwKeyword) {
-    await applyProgressiveMute(message, nsfwViolations, 'NSFW content', '+18 content is not allowed.');
+  if (NSFW_KEYWORDS.some(kw => contentLower.includes(kw))) {
+    await applyProgressiveMute(message, nsfwViolations, 'NSFW', 'No NSFW allowed.');
   }
 
   if (URL_REGEX.test(message.content)) {
     URL_REGEX.lastIndex = 0;
-    await applyProgressiveMute(message, linkViolations, 'Links', 'Links are not allowed.');
-  }
-  URL_REGEX.lastIndex = 0;
-
-  // Role Mention Filter
-  const mentionedRoles = message.mentions.roles;
-  if (mentionedRoles.size > 0) {
-    const memberRoles = member.roles.cache;
-    for (const [sourceRoleId, allowedTargetRoleId] of Object.entries(ROLE_MENTION_MAP)) {
-      if (!memberRoles.has(sourceRoleId)) continue;
-      const hasDisallowedMention = mentionedRoles.some(role => role.id !== allowedTargetRoleId);
-      if (hasDisallowedMention) {
-        await message.delete().catch(() => {});
-        const warning = await message.channel.send(`You are only allowed to mention <@&${allowedTargetRoleId}>.\n\n${message.author}`);
-        return setTimeout(() => warning.delete().catch(() => {}), 5000);
-      }
-    }
+    await applyProgressiveMute(message, linkViolations, 'Links', 'No links allowed.');
   }
 });
 
