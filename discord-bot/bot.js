@@ -1,4 +1,4 @@
-import { Client, GatewayIntentBits, Partials, PermissionFlagsBits } from 'discord.js';
+import { Client, GatewayIntentBits, Partials, PermissionFlagsBits, Collection } from 'discord.js';
 
 const DISCORD_BOT_TOKEN = process.env.DISCORD_BOT_TOKEN;
 
@@ -7,10 +7,10 @@ if (!DISCORD_BOT_TOKEN) {
   process.exit(1);
 }
 
-// Mute Role ID
+// إعدادات القنوات والرواتب
 const MUTE_ROLE_ID = '1493775095028645969';
+const WELCOME_CHANNEL_ID = '123456789012345678'; // ضع هنا ID القناة التي تريد إرسال رسالة الترحيب فيها
 
-// Map: [Role ID]: [Allowed Channel ID(s)]
 const ROLE_MENTION_MAP = {
   '1493317999418015914': '1492963034422050836',
   '1493318000848408606': '1493268166544195697',
@@ -29,14 +29,65 @@ const nsfwViolations = new Map();
 const URL_REGEX = /https?:\/\/\S+|discord\.gg\/\S+|www\.\S+\.\S+/gi;
 const NSFW_KEYWORDS = ['nsfw', '+18', '18+', 'xxx', 'porn', 'sex', 'nude', 'naked'];
 
+// مخزن للدعوات
+const invites = new Collection();
+
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
     GatewayIntentBits.GuildMembers,
+    GatewayIntentBits.GuildInvites, // ضروري لتتبع الدعوات
   ],
   partials: [Partials.Message, Partials.Channel],
+});
+
+// وظيفة تحديث قائمة الدعوات عند التشغيل
+client.once('ready', async () => {
+  console.log(`Bot is online as ${client.user.tag}`);
+  
+  // جلب جميع الدعوات لكل السيرفرات التي يتواجد بها البوت
+  for (const [guildId, guild] of client.guilds.cache) {
+    try {
+      const guildInvites = await guild.invites.fetch();
+      invites.set(guildId, new Collection(guildInvites.map((inv) => [inv.code, inv.uses])));
+    } catch (err) {
+      console.log(`Could not fetch invites for guild: ${guildId}`);
+    }
+  }
+});
+
+// تحديث الكاش عند إنشاء دعوة جديدة
+client.on('inviteCreate', (invite) => {
+  const guildInvites = invites.get(invite.guild.id);
+  if (guildInvites) guildInvites.set(invite.code, invite.uses);
+});
+
+// التعامل مع دخول الأعضاء
+client.on('guildMemberAdd', async (member) => {
+  const welcomeChannel = member.guild.channels.cache.get(WELCOME_CHANNEL_ID);
+  if (!welcomeChannel) return;
+
+  try {
+    const newInvites = await member.guild.invites.fetch();
+    const oldInvites = invites.get(member.guild.id);
+    
+    // البحث عن الدعوة التي زاد عدد استخدامها
+    const invite = newInvites.find(i => i.uses > (oldInvites?.get(i.code) || 0));
+    
+    // تحديث الكاش
+    invites.set(member.guild.id, new Collection(newInvites.map(i => [i.code, i.uses])));
+
+    if (invite) {
+      const inviter = invite.inviter;
+      welcomeChannel.send(`Welcome ${member}! تم دخول الشخص من طرف: **${inviter ? inviter.tag : 'غير معروف'}**\nعدد دعواته الآن: **${invite.uses}**`);
+    } else {
+      welcomeChannel.send(`Welcome ${member}! انضم الشخص للسيرفر (ربما عبر رابط مخصص أو نظام داخلي).`);
+    }
+  } catch (err) {
+    console.error('Error tracking invite:', err);
+  }
 });
 
 async function applyProgressiveMute(message, violationsMap, reason, warningText) {
@@ -64,10 +115,6 @@ async function applyProgressiveMute(message, violationsMap, reason, warningText)
   return true;
 }
 
-client.once('ready', () => {
-  console.log(`Bot is online as ${client.user.tag}`);
-});
-
 client.on('messageCreate', async (message) => {
   if (message.author.bot || !message.guild) return;
 
@@ -76,18 +123,15 @@ client.on('messageCreate', async (message) => {
 
   const contentLower = message.content.toLowerCase();
 
-  // 1. NSFW Text Filter (Removed Media/Attachments check)
   if (NSFW_KEYWORDS.some(kw => contentLower.includes(kw))) {
     if (await applyProgressiveMute(message, nsfwViolations, 'NSFW Content', 'NSFW content is not allowed here.')) return;
   }
 
-  // 2. Link Filter
   if (URL_REGEX.test(message.content)) {
     URL_REGEX.lastIndex = 0;
     if (await applyProgressiveMute(message, linkViolations, 'External Links', 'Posting links is not allowed here.')) return;
   }
 
-  // 3. Custom Mention System
   const mentionedRoles = message.mentions.roles;
   const hasEveryone = message.content.includes('@everyone') || message.content.includes('@here');
 
