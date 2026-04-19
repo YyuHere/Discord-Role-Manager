@@ -76,9 +76,9 @@ client.on('messageCreate', async (message) => {
 
   const contentLower = message.content.toLowerCase();
 
-  // 1. NSFW & Media Filter
-  if (message.attachments.size > 0 || message.stickers.size > 0 || NSFW_KEYWORDS.some(kw => contentLower.includes(kw))) {
-    if (await applyProgressiveMute(message, nsfwViolations, 'NSFW/Media Content', 'Media or NSFW content is not allowed in this channel.')) return;
+  // 1. NSFW Text Filter (Removed Media/Attachments check)
+  if (NSFW_KEYWORDS.some(kw => contentLower.includes(kw))) {
+    if (await applyProgressiveMute(message, nsfwViolations, 'NSFW Content', 'NSFW content is not allowed here.')) return;
   }
 
   // 2. Link Filter
