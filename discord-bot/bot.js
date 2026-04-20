@@ -11,17 +11,7 @@ if (!DISCORD_BOT_TOKEN) {
 const MUTE_ROLE_ID = '1493775095028645969';
 const WELCOME_CHANNEL_ID = '1495491723722494062';
 
-const ROLE_MENTION_MAP = {
-  '1493317999418015914': '1492963034422050836',
-  '1493318000848408606': '1493268166544195697',
-  '1493318001468899490': '1493268285423354018',
-  '1493656673938706442': '1493268335117209822',
-  '1493317990286889010': '1492963182602354860',
-  '1493318000181252107': ['1492963572983140504', '1492964255811506176', '1492963468431720635'],
-  '1493658104297160857': '1493269153417527388',
-  '1493657567073796148': '1493269488139899004',
-  '1493657460811235500': '1493270221580931162',
-};
+// تم حذف ROLE_MENTION_MAP من هنا
 
 const spamViolations = new Map();
 const messageLog = new Map();
@@ -163,13 +153,13 @@ client.on('messageCreate', async (message) => {
       }
 
       try {
-        await message.delete(); // حذف رسالة الأمر أولاً
+        await message.delete(); 
         const deleted = await message.channel.bulkDelete(amount, true);
         const successMsg = await message.channel.send(`✅ Successfully cleared **${deleted.size}** messages.`);
         setTimeout(() => successMsg.delete().catch(() => {}), 5000);
       } catch (err) {
         console.error(err);
-        message.channel.send('An error occurred while trying to clear messages (Messages older than 14 days cannot be bulk deleted).').then(m => setTimeout(() => m.delete(), 5000));
+        message.channel.send('An error occurred while trying to clear messages.').then(m => setTimeout(() => m.delete(), 5000));
       }
       return;
     }
@@ -207,26 +197,7 @@ client.on('messageCreate', async (message) => {
     if (await applyProgressiveMute(message, linkViolations, 'External Links', 'Links are not allowed here!')) return;
   }
 
-  const mentionedRoles = message.mentions.roles;
-  const hasEveryone = message.content.includes('@everyone') || message.content.includes('@here');
-
-  if (mentionedRoles.size > 0 || hasEveryone) {
-    let isViolation = true;
-    for (const [mRoleId] of mentionedRoles) {
-      if (ROLE_MENTION_MAP[mRoleId]) {
-        const allowedChannels = ROLE_MENTION_MAP[mRoleId];
-        const allowedChannelsList = Array.isArray(allowedChannels) ? allowedChannels : [allowedChannels];
-        if (allowedChannelsList.includes(message.channel.id) && message.member.roles.cache.has(mRoleId)) {
-          isViolation = false; 
-        }
-      }
-    }
-    if (isViolation || hasEveryone) {
-      await message.delete().catch(() => {});
-      const warn = await message.channel.send(`${message.author}, you cannot mention this role in this channel!`);
-      setTimeout(() => warn.delete().catch(() => {}), 5000);
-    }
-  }
+  // تم حذف نظام فحص المنشنات المقيدة هنا
 });
 
 client.on('inviteCreate', (invite) => {
@@ -252,4 +223,4 @@ client.on('guildMemberAdd', async (member) => {
   }
 });
 
-client.login(DISCORD_BOT_TOKEN); 
+client.login(DISCORD_BOT_TOKEN);
