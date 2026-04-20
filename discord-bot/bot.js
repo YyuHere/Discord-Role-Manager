@@ -8,7 +8,7 @@ if (!DISCORD_BOT_TOKEN) {
   process.exit(1);
 }
 
-// --- [1] إعداد الـ 9 مجموعات (الفلتر المخصص) ---
+// --- [1] Configuration for 9 Specific Permission Groups (Custom Filter) ---
 const PERMISSIONS_CONFIG = [
   { userRoleId: '1493273222664290385', channelId: '1493270221580931162', targetRoleId: '1493657460811235500' },
   { userRoleId: 'ID_2', channelId: 'CH_2', targetRoleId: 'TAR' },
@@ -24,6 +24,7 @@ const PERMISSIONS_CONFIG = [
 const MUTE_ROLE_ID = '1493775095028645969';
 const WELCOME_CHANNEL_ID = '1495491723722494062';
 
+// Protection Settings
 const spamViolations = new Map();
 const messageLog = new Map();
 const MUTE_DURATIONS_MINUTES = [5, 10, 30, 60, 1440];
@@ -46,6 +47,7 @@ const client = new Client({
   partials: [Partials.Message, Partials.Channel],
 });
 
+// Setup global mute role permissions for all channels
 async function setupMuteRolePermissions(guild) {
   const muteRole = guild.roles.cache.get(MUTE_ROLE_ID);
   if (!muteRole) return;
@@ -57,31 +59,41 @@ async function setupMuteRolePermissions(guild) {
         CreatePublicThreads: false,
         CreatePrivateThreads: false,
       });
-    } catch (err) { console.error(`Error: ${channel.name}`); }
+    } catch (err) { console.error(`Error updating permissions for: ${channel.name}`); }
   });
 }
 
 client.once('ready', async () => {
   console.log(`Bot is online as ${client.user.tag}`);
+  // Cache invites for join tracking
   for (const [guildId, guild] of client.guilds.cache) {
     try {
       const guildInvites = await guild.invites.fetch();
       invites.set(guildId, new Collection(guildInvites.map((inv) => [inv.code, inv.uses])));
-    } catch (err) { console.log(`Invite fetch error: ${guildId}`); }
+    } catch (err) { console.log(`Invite fetch error for guild: ${guildId}`); }
   }
 });
 
+// Function to handle progressive muting
 async function applyProgressiveMute(message, violationsMap, reason, warningText) {
   if (message.member.permissions.has(PermissionFlagsBits.ManageMessages)) return false;
+  
   await message.delete().catch(() => {});
   const userId = message.author.id;
   const violations = (violationsMap.get(userId) || 0) + 1;
   violationsMap.set(userId, violations);
+  
   const muteIndex = Math.min(violations - 1, MUTE_DURATIONS_MINUTES.length - 1);
   const muteDuration = MUTE_DURATIONS_MINUTES[muteIndex];
+  
   await message.member.roles.add(MUTE_ROLE_ID, reason).catch(() => {});
+  
   const warning = await message.channel.send(`🔒 ${message.author}, ${warningText} You have been muted for **${muteDuration}m**.`);
-  setTimeout(() => { message.member.roles.remove(MUTE_ROLE_ID, 'Mute Expired').catch(() => {}); }, muteDuration * 60 * 1000);
+  
+  setTimeout(() => { 
+    message.member.roles.remove(MUTE_ROLE_ID, 'Mute Expired').catch(() => {}); 
+  }, muteDuration * 60 * 1000);
+  
   setTimeout(() => warning.delete().catch(() => {}), 7000);
   return true;
 }
@@ -89,7 +101,7 @@ async function applyProgressiveMute(message, violationsMap, reason, warningText)
 client.on('messageCreate', async (message) => {
   if (message.author.bot || !message.guild) return;
 
-  // --- [2] نظام فلتر المنشنات المخصص (مسح وتحذير فقط) ---
+  // --- [2] Custom Mention Filter System (Specific Roles/Channels) ---
   const currentGroup = PERMISSIONS_CONFIG.find(group => message.channel.id === group.channelId);
   if (currentGroup) {
     const mentionedRoles = message.mentions.roles;
@@ -97,19 +109,19 @@ client.on('messageCreate', async (message) => {
       const hasAuthRole = message.member.roles.cache.has(currentGroup.userRoleId);
       const isCorrectMention = mentionedRoles.every(role => role.id === currentGroup.targetRoleId);
 
-      // إذا الشخص لا يملك الرتبة المسموحة أو منشن رتبة خاطئة
+      // If user doesn't have the authorized role OR mentions the wrong role
       if (!hasAuthRole || !isCorrectMention) {
         if (!message.member.permissions.has(PermissionFlagsBits.ManageMessages)) {
           await message.delete().catch(() => {});
-          const warnMsg = await message.channel.send(`⚠️ ${message.author}, في هذا الروم مسموح فقط لمنشن <@&${currentGroup.targetRoleId}> بواسطة الرتبة المخصصة.`);
+          const warnMsg = await message.channel.send(`⚠️ ${message.author}, in this channel you are only allowed to mention <@&${currentGroup.targetRoleId}> if you have the required role.`);
           setTimeout(() => warnMsg.delete().catch(() => {}), 5000);
-          return; // الخروج لعدم إكمال بقية الفلاتر
+          return; // Stop processing other filters
         }
       }
     }
   }
 
-  // --- [3] نظام الأوامر اليدوية ---
+  // --- [3] Manual Moderation Commands ---
   if (message.content.startsWith(PREFIX)) {
     const args = message.content.slice(PREFIX.length).trim().split(/ +/);
     const command = args.shift().toLowerCase();
@@ -119,10 +131,14 @@ client.on('messageCreate', async (message) => {
       const target = message.mentions.members.first();
       const duration = args[1]; 
       if (!target || !duration || !duration.endsWith('m')) return;
+      
       const minutes = parseInt(duration);
       await target.roles.add(MUTE_ROLE_ID).catch(() => {});
       message.channel.send(`🔒 ${target} has been muted for **${minutes}** minutes.`);
-      setTimeout(() => { target.roles.remove(MUTE_ROLE_ID).catch(() => {}); }, minutes * 60 * 1000);
+      
+      setTimeout(() => { 
+        target.roles.remove(MUTE_ROLE_ID).catch(() => {}); 
+      }, minutes * 60 * 1000);
       return;
     }
 
@@ -135,7 +151,7 @@ client.on('messageCreate', async (message) => {
       return;
     }
 
-    if (command === 'clear' || command === 'مسح') {
+    if (command === 'clear' || command === 'purge') {
       if (!message.member.permissions.has(PermissionFlagsBits.ManageMessages)) return;
       const amount = parseInt(args[0]);
       if (isNaN(amount) || amount <= 0 || amount > 100) return;
@@ -145,32 +161,38 @@ client.on('messageCreate', async (message) => {
     }
   }
 
-  // --- [4] أنظمة الحماية التلقائية (Anti-Spam, NSFW, Links) ---
+  // --- [4] Automatic Protection (Anti-Spam, NSFW, Links) ---
   if (message.member.permissions.has(PermissionFlagsBits.ManageMessages)) return;
 
   const userId = message.author.id;
   const now = Date.now();
   if (!messageLog.has(userId)) messageLog.set(userId, []);
+  
   const userData = messageLog.get(userId);
   userData.push({ timestamp: now, content: message.content });
+  
+  // Keep only recent messages for spam check
   const recentMessages = userData.filter(msg => now - msg.timestamp < SPAM_INTERVAL);
   messageLog.set(userId, recentMessages);
 
+  // Check for Spam (Identical messages or high frequency)
   if (recentMessages.filter(msg => msg.content === message.content).length >= 3 || recentMessages.length >= SPAM_THRESHOLD) {
     if (await applyProgressiveMute(message, spamViolations, 'Anti-Spam', 'Please stop spamming!')) return;
   }
 
+  // Check for NSFW Keywords
   if (NSFW_KEYWORDS.some(kw => message.content.toLowerCase().includes(kw))) {
     if (await applyProgressiveMute(message, nsfwViolations, 'NSFW Content', 'Inappropriate content is not allowed!')) return;
   }
 
+  // Check for External Links
   if (URL_REGEX.test(message.content)) {
-    URL_REGEX.lastIndex = 0;
+    URL_REGEX.lastIndex = 0; // Reset regex state
     if (await applyProgressiveMute(message, linkViolations, 'External Links', 'Links are not allowed here!')) return;
   }
 });
 
-// --- [5] الترحيب وفحص الانفايت ---
+// --- [5] Welcome System & Invite Tracking ---
 client.on('inviteCreate', (invite) => {
   const guildInvites = invites.get(invite.guild.id);
   if (guildInvites) guildInvites.set(invite.code, invite.uses);
@@ -179,13 +201,21 @@ client.on('inviteCreate', (invite) => {
 client.on('guildMemberAdd', async (member) => {
   const welcomeChannel = member.guild.channels.cache.get(WELCOME_CHANNEL_ID);
   if (!welcomeChannel) return;
+  
   try {
     const newInvites = await member.guild.invites.fetch();
     const oldInvites = invites.get(member.guild.id);
     const invite = newInvites.find(i => i.uses > (oldInvites?.get(i.code) || 0));
+    
+    // Update cache
     invites.set(member.guild.id, new Collection(newInvites.map(i => [i.code, i.uses])));
-    welcomeChannel.send(invite ? `Welcome ${member}! Joined via: <@${invite.inviter.id}>.` : `Welcome ${member}!`);
-  } catch (err) { console.error(err); }
+    
+    welcomeChannel.send(invite 
+      ? `Welcome ${member}! Joined using invite from: <@${invite.inviter.id}>.` 
+      : `Welcome ${member}!`);
+  } catch (err) { 
+    console.error('Error fetching invites on member join:', err); 
+  }
 });
 
 client.login(DISCORD_BOT_TOKEN);
