@@ -115,7 +115,7 @@ client.on('messageCreate', async (message) => {
       setTimeout(() => message.delete().catch(() => {}), 3000);
 
       if (!target) return message.reply('Please mention a user to mute.').then(m => setTimeout(() => m.delete(), 3000));
-      if (!duration || !duration.endsWith('m')) return message.reply('Please specify time in minutes, e.g., `!mute @user 10m`').then(m => setTimeout(() => m.delete(), 3000));
+      if (!duration || !duration.endsWith('m')) return message.reply('Please specify time in minutes, e.g., `mute @user 10m`').then(m => setTimeout(() => m.delete(), 3000));
 
       const minutes = parseInt(duration);
       if (isNaN(minutes)) return message.reply('Invalid time format.').then(m => setTimeout(() => m.delete(), 3000));
@@ -145,6 +145,32 @@ client.on('messageCreate', async (message) => {
 
       await target.roles.remove(MUTE_ROLE_ID).catch(e => console.error("Error removing role"));
       message.channel.send(`🔓 ${target} has been unmuted.`);
+      return;
+    }
+
+    // --- Manual Clear Command ---
+    if (command === 'clear' || command === 'مسح') {
+      if (!message.member.permissions.has(PermissionFlagsBits.ManageMessages)) return;
+
+      const amount = parseInt(args[0]);
+
+      if (isNaN(amount)) {
+        return message.reply('Please specify the number of messages to clear. Example: `clear 10`').then(m => setTimeout(() => m.delete(), 4000));
+      }
+
+      if (amount <= 0 || amount > 100) {
+        return message.reply('You can only clear between 1 and 100 messages.').then(m => setTimeout(() => m.delete(), 4000));
+      }
+
+      try {
+        await message.delete(); // حذف رسالة الأمر أولاً
+        const deleted = await message.channel.bulkDelete(amount, true);
+        const successMsg = await message.channel.send(`✅ Successfully cleared **${deleted.size}** messages.`);
+        setTimeout(() => successMsg.delete().catch(() => {}), 5000);
+      } catch (err) {
+        console.error(err);
+        message.channel.send('An error occurred while trying to clear messages (Messages older than 14 days cannot be bulk deleted).').then(m => setTimeout(() => m.delete(), 5000));
+      }
       return;
     }
   }
