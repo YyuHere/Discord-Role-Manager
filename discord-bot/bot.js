@@ -1,4 +1,4 @@
-import { Client, GatewayIntentBits, Partials, PermissionFlagsBits, Collection, ChannelType } from 'discord.js';
+Import { Client, GatewayIntentBits, Partials, PermissionFlagsBits, Collection, ChannelType } from 'discord.js';
 
 const DISCORD_BOT_TOKEN = process.env.DISCORD_BOT_TOKEN;
 const PREFIX = ''; 
@@ -10,6 +10,8 @@ if (!DISCORD_BOT_TOKEN) {
 
 const MUTE_ROLE_ID = '1493775095028645969';
 const WELCOME_CHANNEL_ID = '1495491723722494062';
+
+const ALLOWED_MENTION_ROLE_ID = '1495907812419829791'; 
 
 const ROLE_MENTION_MAP = {
   '1493317999418015914': '1492963034422050836',
