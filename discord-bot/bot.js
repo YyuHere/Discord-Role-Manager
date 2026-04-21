@@ -1,7 +1,7 @@
 import { Client, GatewayIntentBits, Partials, PermissionFlagsBits, Collection, ChannelType } from 'discord.js';
 
 const DISCORD_BOT_TOKEN = process.env.DISCORD_BOT_TOKEN;
-const PREFIX = ''; // يمكنك تغيير البريفكس هنا
+const PREFIX = '!'; // يمكنك تغيير البريفكس هنا
 
 if (!DISCORD_BOT_TOKEN) {
   console.error('Missing DISCORD_BOT_TOKEN');
