@@ -11,7 +11,7 @@ if (!DISCORD_BOT_TOKEN) {
 // --- [1] Configuration for 9 Specific Permission Groups (Custom Filter) ---
 const PERMISSIONS_CONFIG = [
   { userRoleId: '1493273222664290385', channelId: '1493270221580931162', targetRoleId: '1493657460811235500' },
-  { userRoleId: 'ID_2', channelId: 'CH_2', targetRoleId: 'TAR' },
+  { userRoleId: '1493272544252399648', channelId: '1492963034422050836', targetRoleId: '1493317999418015914' },
   { userRoleId: 'ID_3', channelId: 'CH_3', targetRoleId: 'TARGET_3' },
   { userRoleId: 'ID_4', channelId: 'CH_4', targetRoleId: 'TARGET_4' },
   { userRoleId: 'ID_5', channelId: 'CH_5', targetRoleId: 'TARGET_5' },
