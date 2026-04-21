@@ -1,7 +1,7 @@
 import { Client, GatewayIntentBits, Partials, PermissionFlagsBits, Collection, ChannelType, EmbedBuilder } from 'discord.js';
 
 const DISCORD_BOT_TOKEN = process.env.DISCORD_BOT_TOKEN;
-const PREFIX = '!'; 
+const PREFIX = ''; 
 
 if (!DISCORD_BOT_TOKEN) {
   console.error('Missing DISCORD_BOT_TOKEN');
@@ -208,6 +208,28 @@ client.on('messageCreate', async (message) => {
         return;
     }
 
+    // -- Giveaway End Command (NEW) --
+    if (command === 'end') {
+        if (!message.member.permissions.has(PermissionFlagsBits.ManageMessages)) return;
+
+        const messageId = args[0];
+        if (!messageId) return message.reply("⚠️ Please provide the Giveaway Message ID.\nUsage: `!end <message_id>`");
+
+        const giveawayIndex = activeGiveaways.findIndex(g => g.messageId === messageId);
+
+        if (giveawayIndex === -1) {
+            return message.reply("❌ Giveaway not found or already ended.");
+        }
+
+        const giveaway = activeGiveaways[giveawayIndex];
+        giveaway.ended = true;
+
+        await finishGiveaway(giveaway);
+        activeGiveaways.splice(giveawayIndex, 1);
+        
+        return message.reply("✅ Giveaway has been ended manually.");
+    }
+
     // -- Moderation Commands --
     if (command === 'mute') {
       if (!message.member.permissions.has(PermissionFlagsBits.ModerateMembers)) return;
@@ -230,7 +252,7 @@ client.on('messageCreate', async (message) => {
       return;
     }
 
-    if (command === 'clear' || command === 'purge') {
+    if (command === 'clear' || command === 'cl') {
       if (!message.member.permissions.has(PermissionFlagsBits.ManageMessages)) return;
       const amount = parseInt(args[0]);
       if (isNaN(amount) || amount <= 0 || amount > 100) return message.reply("Provide a number between 1 and 100.");
