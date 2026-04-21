@@ -1,12 +1,15 @@
 import { Client, GatewayIntentBits, Partials, PermissionFlagsBits, Collection, ChannelType, EmbedBuilder } from 'discord.js';
 
 const DISCORD_BOT_TOKEN = process.env.DISCORD_BOT_TOKEN;
-const PREFIX = ''; 
+const PREFIX = '!'; 
 
 if (!DISCORD_BOT_TOKEN) {
   console.error('Missing DISCORD_BOT_TOKEN');
   process.exit(1);
 }
+
+// Array to store active giveaways in memory
+let activeGiveaways = [];
 
 // --- [1] Basic Configuration ---
 const AUTO_ROLE_ID = '1495910705172578364'; 
@@ -51,8 +54,60 @@ const client = new Client({
   partials: [Partials.Message, Partials.Channel, Partials.Reaction],
 });
 
+// --- Function to end giveaway and pick winners ---
+async function finishGiveaway(giveaway) {
+    try {
+      const channel = await client.channels.fetch(giveaway.channelId).catch(() => null);
+      if (!channel) return;
+
+      const message = await channel.messages.fetch(giveaway.messageId).catch(() => null);
+      if (!message) return;
+
+      const reaction = message.reactions.cache.get('🎉');
+      if (!reaction) return channel.send(`The giveaway for **${giveaway.prize}** ended, but no reactions were found.`);
+
+      const users = await reaction.users.fetch();
+      const candidates = users.filter(u => !u.bot).map(u => u);
+
+      if (candidates.length === 0) {
+        return channel.send(`The giveaway for **${giveaway.prize}** ended, but no one participated.`);
+      }
+
+      const winners = [];
+      for (let i = 0; i < Math.min(giveaway.winnerCount, candidates.length); i++) {
+        const index = Math.floor(Math.random() * candidates.length);
+        winners.push(candidates.splice(index, 1)[0]);
+      }
+
+      const winnerMentions = winners.map(w => `<@${w.id}>`).join(', ');
+      channel.send(`🎉 Congratulations ${winnerMentions}! You won **${giveaway.prize}**!`);
+
+      const finalEmbed = EmbedBuilder.from(message.embeds[0])
+        .setDescription(`**Prize:** ${giveaway.prize}\n**Winners:** ${winnerMentions}`)
+        .setFooter({ text: 'Giveaway Ended' });
+      
+      await message.edit({ embeds: [finalEmbed] });
+    } catch (err) {
+      console.error('Error in finishGiveaway:', err);
+    }
+}
+
 client.once('ready', async () => {
   console.log(`Bot is online as ${client.user.tag}`);
+  
+  // Periodic check system: runs every 30 seconds to check for giveaway expiration
+  setInterval(async () => {
+    const now = Date.now();
+    for (const giveaway of activeGiveaways) {
+      if (now >= giveaway.endAt && !giveaway.ended) {
+        giveaway.ended = true;
+        await finishGiveaway(giveaway);
+      }
+    }
+    // Remove ended giveaways from the list
+    activeGiveaways = activeGiveaways.filter(g => !g.ended);
+  }, 30000);
+
   for (const [guildId, guild] of client.guilds.cache) {
     try {
       const guildInvites = await guild.invites.fetch();
@@ -62,18 +117,18 @@ client.once('ready', async () => {
 });
 
 async function applyProgressiveMute(message, violationsMap, reason, warningText) {
-  if (message.member.permissions.has(PermissionFlagsBits.ManageMessages)) return false;
-  await message.delete().catch(() => {});
-  const userId = message.author.id;
-  const violations = (violationsMap.get(userId) || 0) + 1;
-  violationsMap.set(userId, violations);
-  const muteIndex = Math.min(violations - 1, MUTE_DURATIONS_MINUTES.length - 1);
-  const muteDuration = MUTE_DURATIONS_MINUTES[muteIndex];
-  await message.member.roles.add(MUTE_ROLE_ID, reason).catch(() => {});
-  const warning = await message.channel.send(`🔒 ${message.author}, ${warningText} You have been muted for **${muteDuration}m**.`);
-  setTimeout(() => { message.member.roles.remove(MUTE_ROLE_ID, 'Mute Expired').catch(() => {}); }, muteDuration * 60 * 1000);
-  setTimeout(() => warning.delete().catch(() => {}), 7000);
-  return true;
+    if (message.member.permissions.has(PermissionFlagsBits.ManageMessages)) return false;
+    await message.delete().catch(() => {});
+    const userId = message.author.id;
+    const violations = (violationsMap.get(userId) || 0) + 1;
+    violationsMap.set(userId, violations);
+    const muteIndex = Math.min(violations - 1, MUTE_DURATIONS_MINUTES.length - 1);
+    const muteDuration = MUTE_DURATIONS_MINUTES[muteIndex];
+    await message.member.roles.add(MUTE_ROLE_ID, reason).catch(() => {});
+    const warning = await message.channel.send(`🔒 ${message.author}, ${warningText} You have been muted for **${muteDuration}m**.`);
+    setTimeout(() => { message.member.roles.remove(MUTE_ROLE_ID, 'Mute Expired').catch(() => {}); }, muteDuration * 60 * 1000);
+    setTimeout(() => warning.delete().catch(() => {}), 7000);
+    return true;
 }
 
 client.on('messageCreate', async (message) => {
@@ -129,7 +184,8 @@ client.on('messageCreate', async (message) => {
             default: return message.reply("❌ Invalid time unit! Use (s, m, h, d).");
         }
 
-        const endTimestamp = Math.floor((Date.now() + durationMs) / 1000);
+        const endAt = Date.now() + durationMs;
+        const endTimestamp = Math.floor(endAt / 1000);
 
         const embed = new EmbedBuilder()
             .setTitle('🎁 Giveaway Alert!')
@@ -141,42 +197,23 @@ client.on('messageCreate', async (message) => {
         const giveawayMsg = await message.channel.send({ embeds: [embed] });
         await giveawayMsg.react('🎉');
 
-        const collector = giveawayMsg.createReactionCollector({ 
-            filter: (reaction, user) => reaction.emoji.name === '🎉' && !user.bot, 
-            time: durationMs 
-        });
-
-        collector.on('end', async (collected) => {
-            const reaction = collected.get('🎉');
-            if (!reaction) return message.channel.send(`The giveaway for **${prize}** ended, but no one participated.`);
-
-            const users = await reaction.users.fetch();
-            const candidates = users.filter(u => !u.bot).map(u => u);
-
-            if (candidates.length === 0) return message.channel.send(`The giveaway for **${prize}** ended, but no one participated.`);
-
-            const winners = [];
-            for (let i = 0; i < Math.min(winnerCount, candidates.length); i++) {
-                const index = Math.floor(Math.random() * candidates.length);
-                winners.push(candidates.splice(index, 1)[0]);
-            }
-
-            const winnerMentions = winners.map(w => `<@${w.id}>`).join(', ');
-            message.channel.send(`🎉 Congratulations ${winnerMentions}! You won **${prize}**!`);
-
-            const finalEmbed = EmbedBuilder.from(embed)
-                .setDescription(`**Prize:** ${prize}\n**Winners:** ${winnerMentions}`)
-                .setFooter({ text: 'Giveaway Ended' });
-            giveawayMsg.edit({ embeds: [finalEmbed] });
+        activeGiveaways.push({
+            messageId: giveawayMsg.id,
+            channelId: message.channel.id,
+            endAt: endAt,
+            winnerCount: winnerCount,
+            prize: prize,
+            ended: false
         });
         return;
     }
 
+    // -- Moderation Commands --
     if (command === 'mute') {
       if (!message.member.permissions.has(PermissionFlagsBits.ModerateMembers)) return;
       const target = message.mentions.members.first();
       const duration = args[1]; 
-      if (!target || !duration || !duration.endsWith('m')) return;
+      if (!target || !duration) return message.reply("Usage: `!mute @user <minutes>m`.");
       const minutes = parseInt(duration);
       await target.roles.add(MUTE_ROLE_ID).catch(() => {});
       message.channel.send(`🔒 ${target} has been muted for **${minutes}** minutes.`);
@@ -196,7 +233,7 @@ client.on('messageCreate', async (message) => {
     if (command === 'clear' || command === 'purge') {
       if (!message.member.permissions.has(PermissionFlagsBits.ManageMessages)) return;
       const amount = parseInt(args[0]);
-      if (isNaN(amount) || amount <= 0 || amount > 100) return;
+      if (isNaN(amount) || amount <= 0 || amount > 100) return message.reply("Provide a number between 1 and 100.");
       await message.delete(); 
       await message.channel.bulkDelete(amount, true);
       return;
@@ -221,6 +258,7 @@ client.on('messageCreate', async (message) => {
     }
   }
 
+  // --- Automod Logic ---
   if (message.member.permissions.has(PermissionFlagsBits.ManageMessages)) return;
 
   const userId = message.author.id;
@@ -243,6 +281,7 @@ client.on('messageCreate', async (message) => {
   }
 });
 
+// --- Events: Join & Invites ---
 client.on('inviteCreate', (invite) => {
   const guildInvites = invites.get(invite.guild.id);
   if (guildInvites) guildInvites.set(invite.code, invite.uses);
