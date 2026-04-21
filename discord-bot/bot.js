@@ -12,13 +12,13 @@ if (!DISCORD_BOT_TOKEN) {
 const PERMISSIONS_CONFIG = [
   { userRoleId: '1493273222664290385', channelId: '1493270221580931162', targetRoleId: '1493657460811235500' },
   { userRoleId: '1493272544252399648', channelId: '1492963034422050836', targetRoleId: '1493317999418015914' },
-  { userRoleId: 'ID_3', channelId: 'CH_3', targetRoleId: 'TARGET_3' },
-  { userRoleId: 'ID_4', channelId: 'CH_4', targetRoleId: 'TARGET_4' },
-  { userRoleId: 'ID_5', channelId: 'CH_5', targetRoleId: 'TARGET_5' },
-  { userRoleId: 'ID_6', channelId: 'CH_6', targetRoleId: 'TARGET_6' },
-  { userRoleId: 'ID_7', channelId: 'CH_7', targetRoleId: 'TARGET_7' },
-  { userRoleId: 'ID_8', channelId: 'CH_8', targetRoleId: 'TARGET_8' },
-  { userRoleId: 'ID_9', channelId: 'CH_9', targetRoleId: 'TARGET_9' },
+  { userRoleId: '1493272676603658310', channelId: '1493268166544195697', targetRoleId: '1493318000848408606' },
+  { userRoleId: '1493272840265269469', channelId: '1493268285423354018', targetRoleId: '1496181481981083701' },
+  { userRoleId: '1493272956527448276', channelId: '1493268335117209822', targetRoleId: '1496181816447467771' },
+  { userRoleId: '1493273089356857354', channelId: '1492963182602354860', targetRoleId: '1496181960182333490' },
+  { userRoleId: '1493273292704977051', channelId: '1492963468431720635 , 1492964255811506176 , 1492963572983140504', targetRoleId: '1496182801760784645' },
+  { userRoleId: '1493334335497961642', channelId: '1493269153417527388', targetRoleId: '1496182227770282055' },
+  { userRoleId: '1493273151570706668', channelId: '1493269488139899004', targetRoleId: '1496182582415720649' },
 ];
 
 const MUTE_ROLE_ID = '1493775095028645969';
