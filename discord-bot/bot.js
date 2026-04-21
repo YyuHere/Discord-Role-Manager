@@ -1,15 +1,15 @@
-import { Client, GatewayIntentBits, Partials, PermissionFlagsBits, Collection, ChannelType } from 'discord.js';
+import { Client, GatewayIntentBits, Partials, PermissionFlagsBits, Collection, ChannelType, EmbedBuilder } from 'discord.js';
 
 const DISCORD_BOT_TOKEN = process.env.DISCORD_BOT_TOKEN;
-const PREFIX = ''; // يمكنك تغيير البريفكس هنا
+const PREFIX = '!'; 
 
 if (!DISCORD_BOT_TOKEN) {
   console.error('Missing DISCORD_BOT_TOKEN');
   process.exit(1);
 }
 
-// --- [1] الإعدادات الأساسية ---
-const AUTO_ROLE_ID = '1495910705172578364'; // ضع هنا أيدي الرتبة التلقائية للأعضاء الجدد
+// --- [1] Basic Configuration ---
+const AUTO_ROLE_ID = '1495910705172578364'; 
 const MUTE_ROLE_ID = '1493775095028645969';
 const WELCOME_CHANNEL_ID = '1495491723722494062';
 
@@ -27,7 +27,6 @@ const PERMISSIONS_CONFIG = [
   { userRoleId: '1493273292704977051', channelId: '1492963572983140504', targetRoleId: '1493318000181252107' },
 ];
 
-// إعدادات الحماية
 const spamViolations = new Map();
 const messageLog = new Map();
 const MUTE_DURATIONS_MINUTES = [5, 10, 30, 60, 1440];
@@ -37,6 +36,8 @@ const linkViolations = new Map();
 const nsfwViolations = new Map();
 const URL_REGEX = /https?:\/\/\S+|discord\.gg\/\S+|www\.\S+\.\S+/gi;
 const NSFW_KEYWORDS = ['nsfw', '+18', '18+', 'xxx', 'porn', 'sex', 'nude', 'naked'];
+
+// Invite Tracking Collection
 const invites = new Collection();
 
 const client = new Client({
@@ -45,9 +46,10 @@ const client = new Client({
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
     GatewayIntentBits.GuildMembers,
-    GatewayIntentBits.GuildInvites, 
+    GatewayIntentBits.GuildInvites,
+    GatewayIntentBits.GuildMessageReactions,
   ],
-  partials: [Partials.Message, Partials.Channel],
+  partials: [Partials.Message, Partials.Channel, Partials.Reaction],
 });
 
 client.once('ready', async () => {
@@ -60,26 +62,18 @@ client.once('ready', async () => {
   }
 });
 
-// دالة تطبيق الكتم التلقائي (Progressive Mute)
+// Progressive Mute Function
 async function applyProgressiveMute(message, violationsMap, reason, warningText) {
   if (message.member.permissions.has(PermissionFlagsBits.ManageMessages)) return false;
-  
   await message.delete().catch(() => {});
   const userId = message.author.id;
   const violations = (violationsMap.get(userId) || 0) + 1;
   violationsMap.set(userId, violations);
-  
   const muteIndex = Math.min(violations - 1, MUTE_DURATIONS_MINUTES.length - 1);
   const muteDuration = MUTE_DURATIONS_MINUTES[muteIndex];
-  
   await message.member.roles.add(MUTE_ROLE_ID, reason).catch(() => {});
-  
   const warning = await message.channel.send(`🔒 ${message.author}, ${warningText} You have been muted for **${muteDuration}m**.`);
-  
-  setTimeout(() => { 
-    message.member.roles.remove(MUTE_ROLE_ID, 'Mute Expired').catch(() => {}); 
-  }, muteDuration * 60 * 1000);
-  
+  setTimeout(() => { message.member.roles.remove(MUTE_ROLE_ID, 'Mute Expired').catch(() => {}); }, muteDuration * 60 * 1000);
   setTimeout(() => warning.delete().catch(() => {}), 7000);
   return true;
 }
@@ -87,14 +81,114 @@ async function applyProgressiveMute(message, violationsMap, reason, warningText)
 client.on('messageCreate', async (message) => {
   if (message.author.bot || !message.guild) return;
 
-  // --- [2] فلتر المنشن المخصص ---
+  // --- [2] Bot Commands (Giveaway & Invites) ---
+  if (message.content.startsWith(PREFIX)) {
+    const args = message.content.slice(PREFIX.length).trim().split(/ +/);
+    const command = args.shift().toLowerCase();
+
+    // -- Invite Check Command --
+    if (command === 'invites') {
+        const target = message.mentions.users.first() || message.author;
+        try {
+            const guildInvites = await message.guild.invites.fetch();
+            const userInvites = guildInvites.filter(inv => inv.inviter && inv.inviter.id === target.id);
+            let inviteCount = 0;
+            userInvites.forEach(inv => inviteCount += inv.uses);
+
+            const invEmbed = new EmbedBuilder()
+                .setColor('#5865F2')
+                .setAuthor({ name: target.username, iconURL: target.displayAvatarURL() })
+                .setDescription(`✅ You have currently **${inviteCount}** invites!`)
+                .setTimestamp();
+
+            return message.reply({ embeds: [invEmbed] });
+        } catch (error) {
+            console.error(error);
+            return message.reply("Could not fetch invites. Ensure I have 'Manage Server' permissions.");
+        }
+    }
+
+    // -- Giveaway Start Command --
+    if (command === 'start') {
+        if (!message.member.permissions.has(PermissionFlagsBits.ManageMessages)) return;
+        
+        const duration = 60000; // 1 Minute
+        const embed = new EmbedBuilder()
+            .setTitle('🎁 Giveaway Alert!')
+            .setDescription(`React with 🎉 to enter!\n**Rule:** You must be in the server during the draw to win.`)
+            .setColor('#f1c40f')
+            .setFooter({ text: `Ends in 60 seconds` })
+            .setTimestamp();
+
+        const giveawayMsg = await message.channel.send({ embeds: [embed] });
+        await giveawayMsg.react('🎉');
+
+        const filter = (reaction, user) => reaction.emoji.name === '🎉' && !user.bot;
+        const collector = giveawayMsg.createReactionCollector({ filter, time: duration });
+
+        collector.on('end', async (collected) => {
+            const reaction = collected.get('🎉');
+            if (!reaction) return message.channel.send('Giveaway ended. No participants found.');
+
+            const users = await reaction.users.fetch();
+            const candidates = users.filter(u => !u.bot);
+            const validWinners = [];
+
+            // Verify if reacting users are still in the server
+            for (const [id, user] of candidates) {
+                try {
+                    const isMember = await message.guild.members.fetch(id);
+                    if (isMember) validWinners.push(isMember);
+                } catch (e) { /* User left the server */ }
+            }
+
+            if (validWinners.length === 0) return message.channel.send('Giveaway ended, but no valid members are currently in the server.');
+
+            const winner = validWinners[Math.floor(Math.random() * validWinners.length)];
+            message.channel.send(`🎉 Congratulations ${winner}! You won the giveaway!`);
+        });
+        return;
+    }
+
+    // --- Manual Admin Commands ---
+    if (command === 'mute') {
+      if (!message.member.permissions.has(PermissionFlagsBits.ModerateMembers)) return;
+      const target = message.mentions.members.first();
+      const duration = args[1]; 
+      if (!target || !duration || !duration.endsWith('m')) return;
+      const minutes = parseInt(duration);
+      await target.roles.add(MUTE_ROLE_ID).catch(() => {});
+      message.channel.send(`🔒 ${target} has been muted for **${minutes}** minutes.`);
+      setTimeout(() => { target.roles.remove(MUTE_ROLE_ID).catch(() => {}); }, minutes * 60 * 1000);
+      return;
+    }
+
+    if (command === 'unmute') {
+      if (!message.member.permissions.has(PermissionFlagsBits.ModerateMembers)) return;
+      const target = message.mentions.members.first();
+      if (!target) return;
+      await target.roles.remove(MUTE_ROLE_ID).catch(() => {});
+      message.channel.send(`🔓 ${target} has been unmuted.`);
+      return;
+    }
+
+    if (command === 'clear' || command === 'purge') {
+      if (!message.member.permissions.has(PermissionFlagsBits.ManageMessages)) return;
+      const amount = parseInt(args[0]);
+      if (isNaN(amount) || amount <= 0 || amount > 100) return;
+      await message.delete(); 
+      await message.channel.bulkDelete(amount, true);
+      return;
+    }
+  }
+
+  // --- [3] Mention Filter & Auto-Protection ---
   const currentGroup = PERMISSIONS_CONFIG.find(group => message.channel.id === group.channelId);
   if (currentGroup) {
     const mentionedRoles = message.mentions.roles;
     if (mentionedRoles.size > 0) {
       const hasAuthRole = message.member.roles.cache.has(currentGroup.userRoleId);
       const isCorrectMention = mentionedRoles.every(role => role.id === currentGroup.targetRoleId);
-
       if (!hasAuthRole || !isCorrectMention) {
         if (!message.member.permissions.has(PermissionFlagsBits.ManageMessages)) {
           await message.delete().catch(() => {});
@@ -106,95 +200,42 @@ client.on('messageCreate', async (message) => {
     }
   }
 
-  // --- [3] أوامر الإدارة اليدوية (Mute, Unmute, Clear) ---
-  if (message.content.startsWith(PREFIX)) {
-    const args = message.content.slice(PREFIX.length).trim().split(/ +/);
-    const command = args.shift().toLowerCase();
-
-    // أمر الكتم
-    if (command === 'mute') {
-      if (!message.member.permissions.has(PermissionFlagsBits.ModerateMembers)) return;
-      const target = message.mentions.members.first();
-      const duration = args[1]; 
-      if (!target || !duration || !duration.endsWith('m')) return;
-      
-      const minutes = parseInt(duration);
-      await target.roles.add(MUTE_ROLE_ID).catch(() => {});
-      message.channel.send(`🔒 ${target} has been muted for **${minutes}** minutes.`);
-      
-      setTimeout(() => { 
-        target.roles.remove(MUTE_ROLE_ID).catch(() => {}); 
-      }, minutes * 60 * 1000);
-      return;
-    }
-
-    // أمر فك الكتم (تمت إعادته هنا)
-    if (command === 'unmute') {
-      if (!message.member.permissions.has(PermissionFlagsBits.ModerateMembers)) return;
-      const target = message.mentions.members.first();
-      if (!target) return;
-      await target.roles.remove(MUTE_ROLE_ID).catch(() => {});
-      message.channel.send(`🔓 ${target} has been unmuted.`);
-      return;
-    }
-
-    // أمر المسح
-    if (command === 'clear' || command === 'purge') {
-      if (!message.member.permissions.has(PermissionFlagsBits.ManageMessages)) return;
-      const amount = parseInt(args[0]);
-      if (isNaN(amount) || amount <= 0 || amount > 100) return;
-      await message.delete(); 
-      await message.channel.bulkDelete(amount, true);
-      return;
-    }
-  }
-
-  // --- [4] الحماية التلقائية ---
   if (message.member.permissions.has(PermissionFlagsBits.ManageMessages)) return;
 
   const userId = message.author.id;
   const now = Date.now();
   if (!messageLog.has(userId)) messageLog.set(userId, []);
-  
   const userData = messageLog.get(userId);
   userData.push({ timestamp: now, content: message.content });
-  
   const recentMessages = userData.filter(msg => now - msg.timestamp < SPAM_INTERVAL);
   messageLog.set(userId, recentMessages);
 
   if (recentMessages.filter(msg => msg.content === message.content).length >= 3 || recentMessages.length >= SPAM_THRESHOLD) {
     if (await applyProgressiveMute(message, spamViolations, 'Anti-Spam', 'Please stop spamming!')) return;
   }
-
   if (NSFW_KEYWORDS.some(kw => message.content.toLowerCase().includes(kw))) {
     if (await applyProgressiveMute(message, nsfwViolations, 'NSFW Content', 'Inappropriate content is not allowed!')) return;
   }
-
   if (URL_REGEX.test(message.content)) {
     URL_REGEX.lastIndex = 0;
     if (await applyProgressiveMute(message, linkViolations, 'External Links', 'Links are not allowed here!')) return;
   }
 });
 
-// --- [5] نظام الرتبة التلقائية والترحيب وتتبع الدعوات ---
+// --- [4] Auto-Role, Welcome & Invite Tracker Events ---
 client.on('inviteCreate', (invite) => {
   const guildInvites = invites.get(invite.guild.id);
   if (guildInvites) guildInvites.set(invite.code, invite.uses);
 });
 
 client.on('guildMemberAdd', async (member) => {
-  // أولاً: إعطاء الرتبة التلقائية فور دخول العضو
+  // Auto-Role Assignment
   try {
     const role = member.guild.roles.cache.get(AUTO_ROLE_ID);
-    if (role) {
-      await member.roles.add(role);
-      console.log(`Auto-role assigned to ${member.user.tag}`);
-    }
-  } catch (err) {
-    console.error('Failed to assign auto-role:', err);
-  }
+    if (role) await member.roles.add(role);
+  } catch (err) { console.error('Auto-role assignment error:', err); }
 
-  // ثانياً: الترحيب وتتبع الدعوات
+  // Welcome Message & Invite Tracking
   const welcomeChannel = member.guild.channels.cache.get(WELCOME_CHANNEL_ID);
   if (!welcomeChannel) return;
   
@@ -202,15 +243,12 @@ client.on('guildMemberAdd', async (member) => {
     const newInvites = await member.guild.invites.fetch();
     const oldInvites = invites.get(member.guild.id);
     const invite = newInvites.find(i => i.uses > (oldInvites?.get(i.code) || 0));
-    
     invites.set(member.guild.id, new Collection(newInvites.map(i => [i.code, i.uses])));
     
     welcomeChannel.send(invite 
-      ? `Welcome ${member}! Joined using invite from: <@${invite.inviter.id}>.` 
+      ? `Welcome ${member}! Joined using an invite from: <@${invite.inviter.id}>.` 
       : `Welcome ${member}!`);
-  } catch (err) { 
-    console.error('Error fetching invites on member join:', err); 
-  }
+  } catch (err) { console.error('Invite fetch error on member join:', err); }
 });
 
 client.login(DISCORD_BOT_TOKEN);
