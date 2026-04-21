@@ -1,14 +1,18 @@
 import { Client, GatewayIntentBits, Partials, PermissionFlagsBits, Collection, ChannelType } from 'discord.js';
 
 const DISCORD_BOT_TOKEN = process.env.DISCORD_BOT_TOKEN;
-const PREFIX = ''; 
+const PREFIX = ''; // يمكنك تغيير البريفكس هنا
 
 if (!DISCORD_BOT_TOKEN) {
   console.error('Missing DISCORD_BOT_TOKEN');
   process.exit(1);
 }
 
-// --- [1] Configuration for 9 Specific Permission Groups (Custom Filter) ---
+// --- [1] الإعدادات الأساسية ---
+const AUTO_ROLE_ID = '1495910705172578364'; // ضع هنا أيدي الرتبة التلقائية للأعضاء الجدد
+const MUTE_ROLE_ID = '1493775095028645969';
+const WELCOME_CHANNEL_ID = '1495491723722494062';
+
 const PERMISSIONS_CONFIG = [
   { userRoleId: '1493273222664290385', channelId: '1493270221580931162', targetRoleId: '1493657460811235500' },
   { userRoleId: '1493272544252399648', channelId: '1492963034422050836', targetRoleId: '1493317999418015914' },
@@ -23,10 +27,7 @@ const PERMISSIONS_CONFIG = [
   { userRoleId: '1493273292704977051', channelId: '1492963572983140504', targetRoleId: '1493318000181252107' },
 ];
 
-const MUTE_ROLE_ID = '1493775095028645969';
-const WELCOME_CHANNEL_ID = '1495491723722494062';
-
-// Protection Settings
+// إعدادات الحماية
 const spamViolations = new Map();
 const messageLog = new Map();
 const MUTE_DURATIONS_MINUTES = [5, 10, 30, 60, 1440];
@@ -49,25 +50,8 @@ const client = new Client({
   partials: [Partials.Message, Partials.Channel],
 });
 
-// Setup global mute role permissions for all channels
-async function setupMuteRolePermissions(guild) {
-  const muteRole = guild.roles.cache.get(MUTE_ROLE_ID);
-  if (!muteRole) return;
-  guild.channels.cache.forEach(async (channel) => {
-    try {
-      await channel.permissionOverwrites.edit(muteRole, {
-        SendMessages: false,
-        AddReactions: false,
-        CreatePublicThreads: false,
-        CreatePrivateThreads: false,
-      });
-    } catch (err) { console.error(`Error updating permissions for: ${channel.name}`); }
-  });
-}
-
 client.once('ready', async () => {
   console.log(`Bot is online as ${client.user.tag}`);
-  // Cache invites for join tracking
   for (const [guildId, guild] of client.guilds.cache) {
     try {
       const guildInvites = await guild.invites.fetch();
@@ -76,7 +60,7 @@ client.once('ready', async () => {
   }
 });
 
-// Function to handle progressive muting
+// دالة تطبيق الكتم التلقائي (Progressive Mute)
 async function applyProgressiveMute(message, violationsMap, reason, warningText) {
   if (message.member.permissions.has(PermissionFlagsBits.ManageMessages)) return false;
   
@@ -103,7 +87,7 @@ async function applyProgressiveMute(message, violationsMap, reason, warningText)
 client.on('messageCreate', async (message) => {
   if (message.author.bot || !message.guild) return;
 
-  // --- [2] Custom Mention Filter System (Specific Roles/Channels) ---
+  // --- [2] فلتر المنشن المخصص ---
   const currentGroup = PERMISSIONS_CONFIG.find(group => message.channel.id === group.channelId);
   if (currentGroup) {
     const mentionedRoles = message.mentions.roles;
@@ -111,23 +95,23 @@ client.on('messageCreate', async (message) => {
       const hasAuthRole = message.member.roles.cache.has(currentGroup.userRoleId);
       const isCorrectMention = mentionedRoles.every(role => role.id === currentGroup.targetRoleId);
 
-      // If user doesn't have the authorized role OR mentions the wrong role
       if (!hasAuthRole || !isCorrectMention) {
         if (!message.member.permissions.has(PermissionFlagsBits.ManageMessages)) {
           await message.delete().catch(() => {});
-          const warnMsg = await message.channel.send(`⚠️ ${message.author}, in this channel you are only allowed to mention <@&${currentGroup.targetRoleId}> if you have the required role.`);
+          const warnMsg = await message.channel.send(`⚠️ ${message.author}, in this channel you are only allowed to mention <@&${currentGroup.targetRoleId}>.`);
           setTimeout(() => warnMsg.delete().catch(() => {}), 5000);
-          return; // Stop processing other filters
+          return;
         }
       }
     }
   }
 
-  // --- [3] Manual Moderation Commands ---
+  // --- [3] أوامر الإدارة اليدوية (Mute, Unmute, Clear) ---
   if (message.content.startsWith(PREFIX)) {
     const args = message.content.slice(PREFIX.length).trim().split(/ +/);
     const command = args.shift().toLowerCase();
 
+    // أمر الكتم
     if (command === 'mute') {
       if (!message.member.permissions.has(PermissionFlagsBits.ModerateMembers)) return;
       const target = message.mentions.members.first();
@@ -144,6 +128,7 @@ client.on('messageCreate', async (message) => {
       return;
     }
 
+    // أمر فك الكتم (تمت إعادته هنا)
     if (command === 'unmute') {
       if (!message.member.permissions.has(PermissionFlagsBits.ModerateMembers)) return;
       const target = message.mentions.members.first();
@@ -153,6 +138,7 @@ client.on('messageCreate', async (message) => {
       return;
     }
 
+    // أمر المسح
     if (command === 'clear' || command === 'purge') {
       if (!message.member.permissions.has(PermissionFlagsBits.ManageMessages)) return;
       const amount = parseInt(args[0]);
@@ -163,7 +149,7 @@ client.on('messageCreate', async (message) => {
     }
   }
 
-  // --- [4] Automatic Protection (Anti-Spam, NSFW, Links) ---
+  // --- [4] الحماية التلقائية ---
   if (message.member.permissions.has(PermissionFlagsBits.ManageMessages)) return;
 
   const userId = message.author.id;
@@ -173,34 +159,42 @@ client.on('messageCreate', async (message) => {
   const userData = messageLog.get(userId);
   userData.push({ timestamp: now, content: message.content });
   
-  // Keep only recent messages for spam check
   const recentMessages = userData.filter(msg => now - msg.timestamp < SPAM_INTERVAL);
   messageLog.set(userId, recentMessages);
 
-  // Check for Spam (Identical messages or high frequency)
   if (recentMessages.filter(msg => msg.content === message.content).length >= 3 || recentMessages.length >= SPAM_THRESHOLD) {
     if (await applyProgressiveMute(message, spamViolations, 'Anti-Spam', 'Please stop spamming!')) return;
   }
 
-  // Check for NSFW Keywords
   if (NSFW_KEYWORDS.some(kw => message.content.toLowerCase().includes(kw))) {
     if (await applyProgressiveMute(message, nsfwViolations, 'NSFW Content', 'Inappropriate content is not allowed!')) return;
   }
 
-  // Check for External Links
   if (URL_REGEX.test(message.content)) {
-    URL_REGEX.lastIndex = 0; // Reset regex state
+    URL_REGEX.lastIndex = 0;
     if (await applyProgressiveMute(message, linkViolations, 'External Links', 'Links are not allowed here!')) return;
   }
 });
 
-// --- [5] Welcome System & Invite Tracking ---
+// --- [5] نظام الرتبة التلقائية والترحيب وتتبع الدعوات ---
 client.on('inviteCreate', (invite) => {
   const guildInvites = invites.get(invite.guild.id);
   if (guildInvites) guildInvites.set(invite.code, invite.uses);
 });
 
 client.on('guildMemberAdd', async (member) => {
+  // أولاً: إعطاء الرتبة التلقائية فور دخول العضو
+  try {
+    const role = member.guild.roles.cache.get(AUTO_ROLE_ID);
+    if (role) {
+      await member.roles.add(role);
+      console.log(`Auto-role assigned to ${member.user.tag}`);
+    }
+  } catch (err) {
+    console.error('Failed to assign auto-role:', err);
+  }
+
+  // ثانياً: الترحيب وتتبع الدعوات
   const welcomeChannel = member.guild.channels.cache.get(WELCOME_CHANNEL_ID);
   if (!welcomeChannel) return;
   
@@ -209,7 +203,6 @@ client.on('guildMemberAdd', async (member) => {
     const oldInvites = invites.get(member.guild.id);
     const invite = newInvites.find(i => i.uses > (oldInvites?.get(i.code) || 0));
     
-    // Update cache
     invites.set(member.guild.id, new Collection(newInvites.map(i => [i.code, i.uses])));
     
     welcomeChannel.send(invite 
